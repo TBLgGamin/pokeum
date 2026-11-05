@@ -74,29 +74,6 @@ def cap_long_side(image: np.ndarray, max_side: int) -> np.ndarray:
     return cv2.resize(image, new_size, interpolation=cv2.INTER_AREA)
 
 
-def encode_webp(image: np.ndarray, quality: int) -> bytes:
-    """Encode an RGB image as lossy WebP bytes.
-
-    Args:
-        image: An RGB image.
-        quality: WebP quality in ``[1, 100]``.
-
-    Returns:
-        The encoded bytes.
-
-    Raises:
-        ValueError: When the image cannot be encoded.
-    """
-    ok, buffer = cv2.imencode(
-        ".webp",
-        cv2.cvtColor(image, cv2.COLOR_RGB2BGR),
-        [cv2.IMWRITE_WEBP_QUALITY, quality],
-    )
-    if not ok:
-        raise ValueError("cannot encode image as webp")
-    return buffer.tobytes()
-
-
 def to_gray(image_rgb: np.ndarray) -> np.ndarray:
     """Convert an RGB image to single-channel grayscale."""
     return cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)

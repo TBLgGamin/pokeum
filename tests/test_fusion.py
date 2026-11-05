@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.models import CardRef, OcrObservation, RecognitionStatus, SignalScore
+from app.models import Candidate, CardRef, OcrObservation, RecognitionStatus, SignalScore
 from app.recognize import fusion
 
 
@@ -76,3 +76,65 @@ def test_no_signals_is_no_match() -> None:
     status, ranked = fusion.fuse({}, _resolve(_cards("a")))
     assert status == RecognitionStatus.NO_MATCH
     assert ranked == []
+
+
+def _printings(*ids: str, name: str = "Pikachu") -> dict[str, CardRef]:
+    """Return cards that share one artwork name across different printings."""
+    return {
+        cid: CardRef(card_id=cid, name=name, set_id=cid, set_name=cid.upper(), number="1")
+        for cid in ids
+    }
+
+
+def test_close_scores_on_same_artwork_are_ambiguous() -> None:
+    cards = _printings("a", "b")
+    status, ranked = fusion.fuse(
+        {fusion.SIGNAL_HASH: [SignalScore("a", 0.78), SignalScore("b", 0.74)]},
+        _resolve(cards),
+    )
+    assert status == RecognitionStatus.AMBIGUOUS
+    assert [c.card.card_id for c in ranked] == ["a", "b"]
+
+
+def test_close_scores_on_different_artwork_stay_uncertain() -> None:
+    cards = _cards("a", "b")
+    status, _ = fusion.fuse(
+        {fusion.SIGNAL_HASH: [SignalScore("a", 0.78), SignalScore("b", 0.74)]},
+        _resolve(cards),
+    )
+    assert status == RecognitionStatus.UNCERTAIN
+
+
+def test_clear_winner_on_same_artwork_is_confident() -> None:
+    cards = _printings("a", "b")
+    status, _ = fusion.fuse(
+        {fusion.SIGNAL_HASH: [SignalScore("a", 0.90), SignalScore("b", 0.74)]},
+        _resolve(cards),
+    )
+    assert status == RecognitionStatus.CONFIDENT
+
+
+def _frame(cards: dict[str, CardRef], *scores: tuple[str, float]) -> list[Candidate]:
+    return [Candidate(card=cards[cid], confidence=conf) for cid, conf in scores]
+
+
+def test_combined_frames_follow_the_agreeing_majority() -> None:
+    cards = _cards("a", "b")
+    # One glared frame loves "b"; two clean frames agree on "a".
+    frames = [
+        _frame(cards, ("b", 0.95), ("a", 0.40)),
+        _frame(cards, ("a", 0.85), ("b", 0.30)),
+        _frame(cards, ("a", 0.88), ("b", 0.35)),
+    ]
+    status, combined = fusion.combine_frames(frames)
+    assert combined[0].card.card_id == "a"
+    assert abs(combined[0].confidence - (0.40 + 0.85 + 0.88) / 3) < 1e-9
+    assert status is RecognitionStatus.UNCERTAIN
+
+
+def test_a_card_seen_in_one_frame_only_is_diluted() -> None:
+    cards = _cards("a", "b")
+    frames = [_frame(cards, ("a", 0.90)), _frame(cards, ("b", 0.90))]
+    status, combined = fusion.combine_frames(frames)
+    assert [round(c.confidence, 3) for c in combined] == [0.45, 0.45]
+    assert status is RecognitionStatus.NO_MATCH

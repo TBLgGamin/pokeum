@@ -57,7 +57,7 @@ def _build(tmp_path: Path) -> Recognizer:
 
     embedder = HistogramEmbedder()
     index_module.build_index(store, embedder, tmp_path)
-    full_index, art_index = index_module.load_embedding_indexes(tmp_path)
+    full_index, art_index = index_module.load_embedding_indexes(tmp_path, embedder.identifier)
     return Recognizer(
         store,
         hash_index=index_module.load_hash_index(store),
@@ -70,7 +70,11 @@ def _build(tmp_path: Path) -> Recognizer:
 def test_recognizes_indexed_card(tmp_path: Path) -> None:
     recognizer = _build(tmp_path)
     result = recognizer.identify(load_image(tmp_path / "s1-2.png"))
-    assert result.status in (RecognitionStatus.CONFIDENT, RecognitionStatus.UNCERTAIN)
+    assert result.status in (
+        RecognitionStatus.CONFIDENT,
+        RecognitionStatus.UNCERTAIN,
+        RecognitionStatus.AMBIGUOUS,
+    )
     assert result.match is not None
     assert result.match.card.card_id == "s1-2"
 
@@ -175,3 +179,207 @@ def test_no_card_detected_when_required(tmp_path: Path) -> None:
     Image.new("RGB", (300, 420), (128, 128, 128)).save(blank)
     result = recognizer.identify(load_image(blank), require_detection=True)
     assert result.status == RecognitionStatus.NO_CARD_DETECTED
+
+
+class _NumberOcr:
+    """OCR fake reading one fixed collector number."""
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def read_text(self, image: np.ndarray) -> list[tuple[str, float]]:
+        return [(self.text, 0.95)]
+
+
+_CROWDED_TOTAL = 60
+
+
+def _build_crowded(tmp_path: Path) -> Recognizer:
+    """Build a catalogue where the OCR-labelled card cannot make the shortlist.
+
+    ``_CROWDED_TOTAL - 1`` cards share the query's exact artwork, so they fill
+    every dense shortlist (``RETRIEVAL_SHORTLIST`` = 50) and the odd card out —
+    the one the OCR number identifies — is ranked last on pixels. This is the
+    reprint case in miniature: pixels cannot see it, the printed number can.
+    """
+    store = ReferenceStore(tmp_path / "ref.db")
+    store.upsert_set(
+        set_id="s1",
+        name="Set One",
+        series="X",
+        release_date="2020-01-01",
+        card_count_total=_CROWDED_TOTAL,
+        card_count_official=_CROWDED_TOTAL,
+        set_code="STO",
+        symbol_url=None,
+        synced_at="now",
+    )
+    rng = np.random.default_rng(7)
+    crowd = rng.integers(0, 256, size=(420, 300, 3), dtype=np.uint8)
+    outlier = 255 - crowd
+    for number in range(1, _CROWDED_TOTAL + 1):
+        card_id = f"s1-{number}"
+        store.upsert_card(
+            card_id=card_id,
+            set_id="s1",
+            name=card_id,
+            number=str(number),
+            number_total=_CROWDED_TOTAL,
+            rarity=None,
+            release_year=2020,
+            image_url="http://x",
+            has_reverse=False,
+            has_first_edition=False,
+            has_holo=False,
+            has_normal=True,
+        )
+        path = tmp_path / f"{card_id}.png"
+        Image.fromarray(outlier if number == _CROWDED_TOTAL else crowd).save(path)
+        store.set_image_path(card_id, str(path))
+
+    query_path = tmp_path / "query.png"
+    Image.fromarray(crowd).save(query_path)
+
+    embedder = HistogramEmbedder()
+    index_module.build_index(store, embedder, tmp_path)
+    full_index, art_index = index_module.load_embedding_indexes(tmp_path, embedder.identifier)
+    return Recognizer(
+        store,
+        hash_index=index_module.load_hash_index(store),
+        embedder=embedder,
+        emb_full_index=full_index,
+        emb_art_index=art_index,
+    )
+
+
+def _ranked_ids(recognizer: Recognizer, tmp_path: Path) -> list[str]:
+    result = recognizer.identify(load_image(tmp_path / "query.png"), top_k=_CROWDED_TOTAL)
+    ranked = ([result.match] if result.match is not None else []) + list(result.alternates)
+    return [candidate.card.card_id for candidate in ranked]
+
+
+def test_ocr_number_retrieves_a_card_the_shortlists_missed(tmp_path: Path) -> None:
+    recognizer = _build_crowded(tmp_path)
+    truth = f"s1-{_CROWDED_TOTAL}"
+
+    without_ocr = _ranked_ids(recognizer, tmp_path)
+    assert truth not in without_ocr  # pixels alone cannot surface it
+
+    recognizer._ocr = _NumberOcr(f"{_CROWDED_TOTAL}/{_CROWDED_TOTAL}")  # noqa: SLF001
+    with_ocr = _ranked_ids(recognizer, tmp_path)
+    assert with_ocr[0] == truth  # the number pins it, and the OCR boost ranks it first
+
+
+def test_ocr_number_matching_many_cards_is_not_used_as_a_filter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recognizer = _build_crowded(tmp_path)
+    monkeypatch.setattr("app.recognize.pipeline.constants.OCR_FILTER_MAX_CANDIDATES", 0)
+    recognizer._ocr = _NumberOcr(f"{_CROWDED_TOTAL}/{_CROWDED_TOTAL}")  # noqa: SLF001
+
+    # Over the cap the second pass is skipped, so the card stays unreachable —
+    # a garbage read must not trigger a full-catalogue rescore.
+    assert f"s1-{_CROWDED_TOTAL}" not in _ranked_ids(recognizer, tmp_path)
+
+
+def _build_two_printings(tmp_path: Path) -> Recognizer:
+    """Build two printings of one artwork that differ only in the bottom strip.
+
+    This is the case fusion cannot settle: the dense signals see one shared
+    illustration, so both printings score within ``CONFIDENT_MARGIN`` and the
+    verdict is ``AMBIGUOUS``. Only the strip tells them apart.
+    """
+    store = ReferenceStore(tmp_path / "ref.db")
+    store.upsert_set(
+        set_id="s1",
+        name="Set One",
+        series="X",
+        release_date="2020-01-01",
+        card_count_total=2,
+        card_count_official=2,
+        set_code="STO",
+        symbol_url=None,
+        synced_at="now",
+    )
+    rng = np.random.default_rng(3)
+    artwork = rng.integers(0, 256, size=(420, 300, 3), dtype=np.uint8)
+    strips = {
+        "s1-1": rng.integers(0, 256, size=(40, 300, 3), dtype=np.uint8),
+        "s1-2": rng.integers(0, 256, size=(40, 300, 3), dtype=np.uint8),
+    }
+
+    def printing(card_id: str) -> np.ndarray:
+        image = artwork.copy()
+        image[380:, :] = strips[card_id]
+        return image
+
+    for number, card_id in enumerate(strips, start=1):
+        store.upsert_card(
+            card_id=card_id,
+            set_id="s1",
+            name="Pikachu",  # one artwork, two printings
+            number=str(number),
+            number_total=2,
+            rarity=None,
+            release_year=2020,
+            image_url="http://x",
+            has_reverse=False,
+            has_first_edition=False,
+            has_holo=False,
+            has_normal=True,
+        )
+        path = tmp_path / f"{card_id}.png"
+        Image.fromarray(printing(card_id)).save(path)
+        store.set_image_path(card_id, str(path))
+
+    Image.fromarray(printing("s1-1")).save(tmp_path / "query.png")
+
+    embedder = HistogramEmbedder()
+    index_module.build_index(store, embedder, tmp_path)
+    full_index, art_index = index_module.load_embedding_indexes(tmp_path, embedder.identifier)
+    return Recognizer(
+        store,
+        hash_index=index_module.load_hash_index(store),
+        embedder=embedder,
+        emb_full_index=full_index,
+        emb_art_index=art_index,
+    )
+
+
+def test_printing_discriminator_settles_an_ambiguous_tie(tmp_path: Path) -> None:
+    recognizer = _build_two_printings(tmp_path)
+
+    result = recognizer.identify(load_image(tmp_path / "query.png"), top_k=2)
+
+    assert result.status == RecognitionStatus.CONFIDENT
+    assert result.match is not None and result.match.card.card_id == "s1-1"
+
+
+def test_upside_down_card_is_turned_before_recognition(tmp_path: Path) -> None:
+    recognizer = _build_two_printings(tmp_path)
+    upside_down = load_image(tmp_path / "query.png")[::-1, ::-1]
+
+    result = recognizer.identify(np.ascontiguousarray(upside_down), top_k=2)
+
+    # Only the right-way-up view puts the distinguishing strip where the
+    # printing discriminator reads it.
+    assert result.status == RecognitionStatus.CONFIDENT
+    assert result.match is not None and result.match.card.card_id == "s1-1"
+
+
+def test_tie_stays_ambiguous_without_the_printing_discriminator(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recognizer = _build_two_printings(tmp_path)
+    # Control: with the discriminator unable to decide, fusion's own verdict
+    # stands and the caller is asked to choose between the printings.
+    monkeypatch.setattr(
+        "app.recognize.pipeline.rerank_printings",
+        lambda _card, candidates, _paths: (candidates, 0.0),
+    )
+
+    result = recognizer.identify(load_image(tmp_path / "query.png"), top_k=2)
+
+    assert result.status == RecognitionStatus.AMBIGUOUS
+    assert result.match is not None
+    assert len(result.alternates) == 1

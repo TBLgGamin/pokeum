@@ -7,23 +7,20 @@ validate against the response models. All the real work lives in the pipeline.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, HTTPException, Query, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, RedirectResponse
-from pydantic import ValidationError
 
 from app.api.schemas import (
     CardDetailResponse,
     HealthResponse,
     IdentifyResponse,
-    ScanAccepted,
-    ScanAnnotation,
 )
-from app.collect import ScanCollector
 from app.core import config, constants
 from app.recognize.pipeline import Recognizer
 from app.reference import images
@@ -105,6 +102,7 @@ def health(request: Request) -> HealthResponse:
         status="ok",
         cards_indexed=recognizer.store.count_cards(),
         embedder_loaded=recognizer.has_embeddings,
+        embedder_id=recognizer.embedder_id,
     )
 
 
@@ -131,9 +129,22 @@ async def identify(
         The recognition result as a dictionary matching :class:`IdentifyResponse`.
 
     Raises:
-        HTTPException: 400 when the upload cannot be decoded as an image.
+        HTTPException: 400 when the upload cannot be decoded as an image, or
+            503 when no recognition slot frees up in time.
     """
     payload = await file.read()
+    semaphore: asyncio.Semaphore = request.app.state.identify_semaphore
+    try:
+        await asyncio.wait_for(
+            semaphore.acquire(), timeout=constants.IDENTIFY_QUEUE_TIMEOUT_SECONDS
+        )
+    except TimeoutError as error:
+        logger.warning(
+            "identify shed: no slot within %.1fs", constants.IDENTIFY_QUEUE_TIMEOUT_SECONDS
+        )
+        raise HTTPException(
+            status_code=503, detail="recognizer busy", headers={"Retry-After": "1"}
+        ) from error
     try:
         return await run_in_threadpool(
             _decode_and_identify,
@@ -145,48 +156,80 @@ async def identify(
         )
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+    finally:
+        semaphore.release()
 
 
-@router.post("/scans", status_code=202, response_model=ScanAccepted)
-async def submit_scan(
-    request: Request,
-    background: BackgroundTasks,
-    file: UploadFile,
-    annotation: str = Form(...),
-) -> ScanAccepted:
-    """Accept a saved scan for background collection as training data.
-
-    The response returns immediately; the upload to S3 (if configured) happens
-    after it. The annotation's consent flag is checked server-side as defense
-    in depth — without it the scan is dropped, but the response is identical so
-    the client cannot tell users apart by behaviour.
-
-    Args:
-        request: The incoming request (carries the collector).
-        background: FastAPI background task queue for the actual upload.
-        file: The captured photo as uploaded by the scan UI.
-        annotation: The scan's annotation as a JSON string form field.
-
-    Returns:
-        An acknowledgement; always accepted when the payload is well-formed.
+def _decode_and_identify_burst(
+    recognizer: Recognizer,
+    payloads: list[bytes],
+    top_k: int,
+    require_detection: bool,
+    guide_margin: float | None,
+) -> dict:
+    """Decode several frames of one card and recognize them as a burst.
 
     Raises:
-        HTTPException: 422 when the annotation is not valid JSON for the schema.
+        ValueError: When any frame cannot be decoded as an image.
     """
-    try:
-        parsed = ScanAnnotation.model_validate_json(annotation)
-    except ValidationError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
-    payload = await file.read()
-    if parsed.consent:
-        collector: ScanCollector = request.app.state.collector
-        background.add_task(
-            collector.store,
-            payload,
-            file.content_type or "image/jpeg",
-            parsed.model_dump(),
+    frames = [cap_long_side(decode_bytes(p), constants.INGEST_MAX_SIDE) for p in payloads]
+    result = recognizer.identify_burst(
+        frames,
+        top_k=top_k,
+        require_detection=require_detection,
+        guide_margin=guide_margin,
+    )
+    return result.as_dict()
+
+
+@router.post("/identify/burst", response_model=IdentifyResponse)
+async def identify_burst(
+    request: Request,
+    files: list[UploadFile],
+    top_k: int = Query(constants.DEFAULT_TOP_K, ge=1, le=50),
+    require_detection: bool = Query(False),
+    guide_margin: float | None = Query(None, ge=0.0, le=0.5),
+) -> dict:
+    """Identify one card from 1-``BURST_MAX_FRAMES`` frames of it.
+
+    The scan UI calls this when a single frame was not decisive: frames are
+    recognized in order, merged by mean confidence, and recognition stops as
+    soon as the frames agree confidently. A burst holds one recognition slot
+    for its whole run, so it is shed (503) under load like a single identify.
+
+    Raises:
+        HTTPException: 400 for a bad frame count or an undecodable frame, or
+            503 when no recognition slot frees up in time.
+    """
+    if not 1 <= len(files) <= constants.BURST_MAX_FRAMES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"send between 1 and {constants.BURST_MAX_FRAMES} frames",
         )
-    return ScanAccepted(accepted=True)
+    payloads = [await upload.read() for upload in files]
+    semaphore: asyncio.Semaphore = request.app.state.identify_semaphore
+    try:
+        await asyncio.wait_for(
+            semaphore.acquire(), timeout=constants.IDENTIFY_QUEUE_TIMEOUT_SECONDS
+        )
+    except TimeoutError as error:
+        logger.warning("burst shed: no slot within %.1fs", constants.IDENTIFY_QUEUE_TIMEOUT_SECONDS)
+        raise HTTPException(
+            status_code=503, detail="recognizer busy", headers={"Retry-After": "1"}
+        ) from error
+    try:
+        return await run_in_threadpool(
+            _decode_and_identify_burst,
+            _recognizer(request),
+            payloads,
+            top_k,
+            require_detection,
+            guide_margin,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    finally:
+        semaphore.release()
 
 
 @router.get("/cards/{card_id}", response_model=CardDetailResponse)

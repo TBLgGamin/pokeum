@@ -23,12 +23,15 @@ class RecognitionStatus(StrEnum):
     Attributes:
         CONFIDENT: A single card cleared the confidence and margin thresholds.
         UNCERTAIN: A best guess exists but below the confident bar; alternates matter.
+        AMBIGUOUS: The artwork is identified but two printings of it are too close
+            to separate; the caller must choose.
         NO_MATCH: Nothing scored high enough to report.
         NO_CARD_DETECTED: No card-shaped region was found in the image.
     """
 
     CONFIDENT = "confident"
     UNCERTAIN = "uncertain"
+    AMBIGUOUS = "ambiguous"
     NO_MATCH = "no_match"
     NO_CARD_DETECTED = "no_card_detected"
 
@@ -148,6 +151,39 @@ class OcrObservation:
 
 
 @dataclass(frozen=True, slots=True)
+class NameObservation:
+    """A card name read from the title band and matched to the catalogue.
+
+    Attributes:
+        raw_text: The OCR line the name was found in.
+        name: The matched catalogue name.
+        similarity: How closely the read matched the name (1.0 = exact key).
+        confidence: OCR engine confidence of that line in ``[0, 1]``.
+        card_ids: Every card of the name family (the name, or the name plus
+            whole-word suffixes such as "ex" or "V").
+    """
+
+    raw_text: str
+    name: str
+    similarity: float
+    confidence: float
+    card_ids: frozenset[str] = frozenset()
+
+    @property
+    def strength(self) -> float:
+        """Return the evidence weight in ``[0, 1]``: similarity times OCR confidence."""
+        return self.similarity * self.confidence
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return a JSON-serialisable view of the observation."""
+        return {
+            "name": self.name,
+            "similarity": round(self.similarity, 3),
+            "confidence": round(self.confidence, 3),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class VariantGuess:
     """A rule-based assertion about one print variant of the winning card.
 
@@ -202,6 +238,7 @@ class RecognitionResult:
         alternates: Lower-ranked candidates, best first.
         variants: Variant guesses for the winning card.
         ocr: The OCR observation used during fusion, if any.
+        name: The title-band name read used during fusion, if any.
     """
 
     status: RecognitionStatus
@@ -209,6 +246,7 @@ class RecognitionResult:
     alternates: tuple[Candidate, ...] = ()
     variants: tuple[VariantGuess, ...] = ()
     ocr: OcrObservation | None = None
+    name: NameObservation | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable view of the whole result."""
@@ -220,4 +258,5 @@ class RecognitionResult:
             "match": match,
             "alternates": [c.as_dict() for c in self.alternates],
             "ocr": self.ocr.as_dict() if self.ocr else None,
+            "name": self.name.as_dict() if self.name else None,
         }

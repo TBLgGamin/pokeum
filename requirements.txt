@@ -36,8 +36,3 @@ python-multipart==0.0.32
 # Loads a local .env into the process environment at startup (main.py); real
 # environment variables always take precedence.
 python-dotenv==1.2.2
-
-# --- Scan collection ----------------------------------------------------------
-# Background upload of accepted scans (image + annotation) to S3 for future
-# encoder fine-tunes. Only exercised when SCANS_S3_BUCKET is configured.
-boto3==1.43.49

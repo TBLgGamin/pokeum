@@ -171,6 +171,20 @@ def test_get_cards_spans_chunks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     store.close()
 
 
+def test_image_paths_skips_uncached_and_unknown(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    _insert_simple_card(store, "sv02-1", "1")
+    _insert_simple_card(store, "sv02-2", "2")
+    store.set_image_path("sv02-1", r"data\images\sv02\sv02-1.webp")
+
+    # sv02-2 exists but was never downloaded; "nope" does not exist at all.
+    resolved = store.image_paths(["sv02-1", "sv02-2", "nope"])
+
+    assert resolved == {"sv02-1": str(Path("data/images/sv02/sv02-1.webp"))}
+    assert store.image_paths([]) == {}
+    store.close()
+
+
 def test_known_set_codes_excludes_null(tmp_path: Path) -> None:
     store = _store(tmp_path)  # sv02 has set_code "PAL"
     store.upsert_set(

@@ -17,6 +17,7 @@ import numpy as np
 from app.core import constants
 from app.vision import geometry
 from app.vision.imaging import cap_long_side, to_gray
+from app.vision.refine import refine_quad
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,7 @@ def detect_card_quad(image_rgb: np.ndarray) -> np.ndarray | None:
     for contour in ranked:
         quad = _quad_from_contour(contour)
         if quad is not None and geometry.is_plausible_card(quad, frame_area):
+            quad = refine_quad(gray, quad)
             return geometry.order_corners(quad * scale)
     logger.debug(
         "no plausible card quad among %d contours (working frame %dx%d, canny %d/%d)",

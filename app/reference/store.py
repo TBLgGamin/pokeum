@@ -380,6 +380,11 @@ class ReferenceStore:
         rows = self._conn.execute(_ALL_CARDS_SQL).fetchall()
         return [_row_to_card(row) for row in rows]
 
+    def card_names(self) -> list[tuple[str, str]]:
+        """Return ``(card_id, name)`` for every card, for title-name matching."""
+        rows = self._conn.execute("SELECT id, name FROM cards").fetchall()
+        return [(row["id"], row["name"]) for row in rows]
+
     def count_cards(self) -> int:
         """Return the number of cards stored."""
         return int(self._conn.execute("SELECT COUNT(*) AS n FROM cards").fetchone()["n"])
@@ -402,6 +407,35 @@ class ReferenceStore:
             "SELECT id, image_path FROM cards WHERE image_path IS NOT NULL"
         ).fetchall()
         return [(row["id"], _portable_path(row["image_path"])) for row in rows]
+
+    def image_paths(self, card_ids: Iterable[str]) -> dict[str, str]:
+        """Return the cached image path of every card among ``card_ids``.
+
+        One chunked ``IN`` query in the style of :meth:`get_cards`: the printing
+        discriminator resolves a handful of candidates per ambiguous scan and
+        must not pay a round-trip each. Cards that exist but have no cached file
+        are silently absent, exactly like unknown ids.
+
+        Args:
+            card_ids: Card ids to resolve (duplicates are fine).
+
+        Returns:
+            Mapping of card id to its platform-normalized cached image path.
+        """
+        unique = list(dict.fromkeys(card_ids))
+        resolved: dict[str, str] = {}
+        for start in range(0, len(unique), _SQL_IN_CHUNK):
+            chunk = unique[start : start + _SQL_IN_CHUNK]
+            placeholders = ",".join("?" * len(chunk))
+            # Only "?" placeholders are interpolated; every value is bound.
+            rows = self._conn.execute(
+                "SELECT id, image_path FROM cards "  # nosec B608
+                f"WHERE image_path IS NOT NULL AND id IN ({placeholders})",
+                chunk,
+            ).fetchall()
+            for row in rows:
+                resolved[row["id"]] = _portable_path(row["image_path"])
+        return resolved
 
     def find_card_ids_by_number(self, number: str, number_total: int | None = None) -> list[str]:
         """Return card ids whose collector number (and optional total) match.

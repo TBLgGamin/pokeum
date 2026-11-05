@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import cv2
 import numpy as np
 
 from app.core import constants
 from app.vision.detect import detect_card_quad
-from app.vision.geometry import is_plausible_card
+from app.vision.geometry import is_plausible_card, is_sideways
 from app.vision.rectify import rectify_or_whole
 
 
@@ -65,6 +66,42 @@ def test_detects_card_in_oversized_image_in_original_coords() -> None:
     assert quad is not None
     expected = np.array([[left, top], [right, top], [right, bottom], [left, bottom]], np.float32)
     assert np.allclose(quad, expected, atol=12)
+
+
+def _rounded_card_frame(corners: np.ndarray) -> np.ndarray:
+    """Draw an anti-aliased card with rounded corners at sub-pixel corners."""
+    frame = np.full((800, 600, 3), 40, dtype=np.uint8)
+    shift = 4  # cv2 fixed-point bits: corners are drawn at 1/16 px precision
+    cv2.fillConvexPoly(
+        frame, np.round(corners * 16).astype(np.int32), (225, 225, 225), cv2.LINE_AA, shift
+    )
+    for corner in corners:
+        # Knock the sharp corner off, as a real card's rounded corner does.
+        cv2.circle(frame, tuple(int(v) for v in np.round(corner)), 9, (40, 40, 40), -1, cv2.LINE_AA)
+    return frame
+
+
+def test_refinement_recovers_the_corners_of_a_rounded_card() -> None:
+    theta = np.deg2rad(12)
+    rotation = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
+    upright = np.array([[-150.3, -210.6], [150.2, -210.6], [150.2, 210.4], [-150.3, 210.4]])
+    truth = (upright @ rotation.T + [300.4, 400.7]).astype(np.float32)
+    quad = detect_card_quad(_rounded_card_frame(truth))
+    assert quad is not None
+    # The contour quad is cut short by the rounded corners (8-10 px off here);
+    # the line refit extrapolates the straight sides to the true corners, up to
+    # the half-pixel bias of locating an anti-aliased step by its gradient peak.
+    assert float(np.max(np.linalg.norm(quad - truth, axis=1))) < 1.5
+
+
+def test_detects_a_card_lying_sideways() -> None:
+    frame = np.full((600, 800, 3), 30, dtype=np.uint8)
+    frame[150:450, 190:610] = 235  # 420 wide x 300 tall: a portrait card turned 90°
+    quad = detect_card_quad(frame)
+    assert quad is not None
+    assert is_sideways(quad)
+    card = rectify_or_whole(frame, quad)
+    assert card.shape == (constants.CARD_HEIGHT_PX, constants.CARD_WIDTH_PX, 3)
 
 
 def test_rectify_or_whole_without_quad_returns_canonical() -> None:

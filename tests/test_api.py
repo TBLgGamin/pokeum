@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import io
-import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -11,37 +11,11 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from app.api.server import create_app
-from app.collect import ScanCollector
+from app.core import constants
+from app.models import RecognitionResult, RecognitionStatus
 from app.recognize.pipeline import Recognizer
 from app.reference.store import ReferenceStore
 from app.signals.hashes import HashIndex
-
-
-class _FakeCollector(ScanCollector):
-    """Collector that records store() calls instead of touching S3."""
-
-    def __init__(self) -> None:
-        super().__init__(bucket="test-bucket")
-        self.stored: list[tuple[bytes, str, dict[str, object]]] = []
-
-    def store(self, image: bytes, content_type: str, annotation: dict[str, object]) -> None:
-        self.stored.append((image, content_type, annotation))
-
-
-def _annotation(consent: bool = True) -> str:
-    return json.dumps(
-        {
-            "schema_version": 1,
-            "consent": consent,
-            "card_id": "s1-1",
-            "set_id": "s1",
-            "number": "1",
-            "status": "confident",
-            "variants": [],
-            "alternate_card_ids": [],
-            "captured_at": "2026-07-16T12:00:00Z",
-        }
-    )
 
 
 def _png_bytes() -> bytes:
@@ -100,6 +74,7 @@ def test_health_reports_card_count(tmp_path: Path) -> None:
     assert body["status"] == "ok"
     assert body["cards_indexed"] == 2
     assert body["embedder_loaded"] is False
+    assert body["embedder_id"] == "none"
 
 
 def test_identify_accepts_image_upload(tmp_path: Path) -> None:
@@ -157,45 +132,21 @@ def test_identify_rejects_non_image(tmp_path: Path) -> None:
     assert response.status_code == 400
 
 
-def test_submit_scan_stores_in_background(tmp_path: Path) -> None:
-    collector = _FakeCollector()
-    with TestClient(create_app(_recognizer(tmp_path), collector)) as client:
-        response = client.post(
-            "/api/scans",
-            files={"file": ("scan.jpg", b"jpeg-bytes", "image/jpeg")},
-            data={"annotation": _annotation()},
-        )
-    # TestClient runs background tasks before returning the response.
-    assert response.status_code == 202
-    assert response.json() == {"accepted": True}
-    assert len(collector.stored) == 1
-    image, content_type, annotation = collector.stored[0]
-    assert image == b"jpeg-bytes"
-    assert content_type == "image/jpeg"
-    assert annotation["card_id"] == "s1-1"
+def _frames(count: int) -> list[tuple[str, tuple[str, bytes, str]]]:
+    return [("files", (f"f{i}.png", _png_bytes(), "image/png")) for i in range(count)]
 
 
-def test_submit_scan_without_consent_is_dropped(tmp_path: Path) -> None:
-    collector = _FakeCollector()
-    with TestClient(create_app(_recognizer(tmp_path), collector)) as client:
-        response = client.post(
-            "/api/scans",
-            files={"file": ("scan.jpg", b"jpeg-bytes", "image/jpeg")},
-            data={"annotation": _annotation(consent=False)},
-        )
-    # Same acknowledgement either way, but nothing reaches the collector.
-    assert response.status_code == 202
-    assert collector.stored == []
+def test_burst_without_a_card_in_any_frame_reports_no_card(tmp_path: Path) -> None:
+    with TestClient(create_app(_recognizer(tmp_path))) as client:
+        response = client.post("/api/identify/burst?require_detection=true", files=_frames(3))
+    assert response.status_code == 200
+    assert response.json()["status"] == "no_card_detected"
 
 
-def test_submit_scan_rejects_malformed_annotation(tmp_path: Path) -> None:
-    with TestClient(create_app(_recognizer(tmp_path), _FakeCollector())) as client:
-        response = client.post(
-            "/api/scans",
-            files={"file": ("scan.jpg", b"jpeg-bytes", "image/jpeg")},
-            data={"annotation": "{not json"},
-        )
-    assert response.status_code == 422
+def test_burst_rejects_too_many_frames(tmp_path: Path) -> None:
+    with TestClient(create_app(_recognizer(tmp_path))) as client:
+        response = client.post("/api/identify/burst", files=_frames(constants.BURST_MAX_FRAMES + 1))
+    assert response.status_code == 400
 
 
 def test_card_image_missing_returns_404(tmp_path: Path) -> None:
@@ -229,3 +180,46 @@ def test_get_card_found_and_missing(tmp_path: Path) -> None:
     assert found.status_code == 200
     assert found.json()["card_id"] == "s1-1"
     assert missing.status_code == 404
+
+
+class _BlockingRecognizer(Recognizer):
+    """Recognizer whose identify() parks until the test releases it."""
+
+    def __init__(self, store: ReferenceStore) -> None:
+        super().__init__(store, hash_index=HashIndex([], {}))
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def identify(self, *args: object, **kwargs: object) -> RecognitionResult:
+        self.entered.set()
+        self.release.wait(timeout=10)
+        return RecognitionResult(status=RecognitionStatus.NO_MATCH)
+
+
+def test_identify_sheds_load_beyond_the_concurrency_cap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("IDENTIFY_MAX_CONCURRENCY", "1")
+    monkeypatch.setattr(constants, "IDENTIFY_QUEUE_TIMEOUT_SECONDS", 0.2)
+    recognizer = _BlockingRecognizer(ReferenceStore(tmp_path / "ref.db"))
+    with TestClient(create_app(recognizer)) as client:
+        first: list[int] = []
+
+        def occupy() -> None:
+            first.append(
+                client.post(
+                    "/api/identify", files={"file": ("card.png", _png_bytes(), "image/png")}
+                ).status_code
+            )
+
+        holder = threading.Thread(target=occupy)
+        holder.start()
+        assert recognizer.entered.wait(timeout=5)
+
+        shed = client.post("/api/identify", files={"file": ("card.png", _png_bytes(), "image/png")})
+        assert shed.status_code == 503
+        assert shed.headers["Retry-After"] == "1"
+
+        recognizer.release.set()
+        holder.join(timeout=10)
+    assert first == [200]

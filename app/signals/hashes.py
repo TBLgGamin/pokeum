@@ -14,6 +14,7 @@ index required.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 
 import imagehash
 import numpy as np
@@ -81,6 +82,8 @@ class HashIndex:
         """
         self.card_ids = card_ids
         self.matrices = matrices
+        # Built on first subset lookup only; full scans never need it.
+        self._rows: dict[str, int] | None = None
 
     @classmethod
     def from_store_rows(cls, rows: list[tuple[str, dict[str, str]]]) -> HashIndex:
@@ -114,9 +117,6 @@ class HashIndex:
     ) -> list[SignalScore]:
         """Score the catalogue against one image by closest hash match.
 
-        For each card the Hamming distance is taken per hash kind and the minimum
-        across kinds is kept, then mapped to a similarity in ``[0, 1]``.
-
         Args:
             image: Query image (rectified card).
             top_k: Number of best matches to return.
@@ -124,9 +124,55 @@ class HashIndex:
         Returns:
             The ``top_k`` highest-scoring cards, best first.
         """
-        if not self.card_ids or not self.matrices:
+        return self.query_hashes(compute_hashes(image), top_k=top_k)
+
+    def query_hashes(
+        self, query_hashes: dict[str, str], top_k: int = constants.RETRIEVAL_SHORTLIST
+    ) -> list[SignalScore]:
+        """Score the catalogue against an already-computed hash family.
+
+        For each card the Hamming distance is taken per hash kind and the minimum
+        across kinds is kept, then mapped to a similarity in ``[0, 1]``. Callers
+        that need a second pass over a subset compute the family once and reuse
+        it here and in :meth:`scores_for`.
+
+        Args:
+            query_hashes: The query's ``{kind: hex}`` family.
+            top_k: Number of best matches to return.
+
+        Returns:
+            The ``top_k`` highest-scoring cards, best first.
+        """
+        scores = self._similarities(query_hashes)
+        if scores is None:
             return []
-        query_hashes = compute_hashes(image)
+        order = np.argsort(scores)[::-1][:top_k]
+        return [SignalScore(self.card_ids[i], float(scores[i])) for i in order]
+
+    def scores_for(
+        self, query_hashes: dict[str, str], card_ids: Iterable[str]
+    ) -> list[SignalScore]:
+        """Score a named subset of cards against an already-computed hash family.
+
+        Args:
+            query_hashes: The query's ``{kind: hex}`` family.
+            card_ids: Cards to score; ids absent from the index are skipped.
+
+        Returns:
+            One score per known id, best first.
+        """
+        scores = self._similarities(query_hashes)
+        if scores is None:
+            return []
+        rows = self._row_index()
+        picked = [(cid, rows[cid]) for cid in card_ids if cid in rows]
+        picked.sort(key=lambda item: scores[item[1]], reverse=True)
+        return [SignalScore(cid, float(scores[row])) for cid, row in picked]
+
+    def _similarities(self, query_hashes: dict[str, str]) -> np.ndarray | None:
+        """Return per-card similarity in ``[0, 1]``, or ``None`` when unusable."""
+        if not self.card_ids or not self.matrices:
+            return None
         best = np.full(len(self.card_ids), constants.HASH_BITS, dtype=np.int32)
         for kind, matrix in self.matrices.items():
             if not query_hashes.get(kind):
@@ -134,6 +180,10 @@ class HashIndex:
             packed = _hex_to_packed(query_hashes[kind])
             distances = np.bitwise_count(np.bitwise_xor(matrix, packed)).sum(axis=1, dtype=np.int32)
             best = np.minimum(best, distances)
-        scores = 1.0 - best.astype(np.float32) / float(constants.HASH_BITS)
-        order = np.argsort(scores)[::-1][:top_k]
-        return [SignalScore(self.card_ids[i], float(scores[i])) for i in order]
+        return 1.0 - best.astype(np.float32) / float(constants.HASH_BITS)
+
+    def _row_index(self) -> dict[str, int]:
+        """Return a lazily built ``{card_id: row}`` map for subset lookups."""
+        if self._rows is None:
+            self._rows = {cid: row for row, cid in enumerate(self.card_ids)}
+        return self._rows

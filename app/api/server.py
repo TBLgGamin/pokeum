@@ -7,6 +7,7 @@ request to share. Tests inject a ready-made recognizer to skip that cost.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -17,28 +18,21 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import router
 from app.api.static import SPAStaticFiles
-from app.collect import ScanCollector
 from app.core import config
 from app.recognize.factory import build_recognizer
 from app.recognize.pipeline import Recognizer
 
 logger = logging.getLogger(__name__)
 
-_API_VERSION = "1.4.0"
+_API_VERSION = "2.0.0"
 
 
-def create_app(
-    recognizer: Recognizer | None = None,
-    collector: ScanCollector | None = None,
-) -> FastAPI:
+def create_app(recognizer: Recognizer | None = None) -> FastAPI:
     """Create the FastAPI application.
 
     Args:
         recognizer: A pre-built recognizer to serve (used in tests). When
             omitted, one is built from configured reference data on startup.
-        collector: A pre-built scan collector (used in tests). When omitted,
-            one is built from the ``SCANS_S3_*`` settings; an unconfigured
-            bucket leaves it disabled and every upload becomes a no-op.
 
     Returns:
         The configured application.
@@ -47,11 +41,10 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.recognizer = recognizer or build_recognizer()
-        app.state.collector = collector or ScanCollector.from_config()
-        logger.info(
-            "recognizer loaded into app state; scan collection %s",
-            "enabled" if app.state.collector.enabled else "disabled",
-        )
+        # Recognition is CPU-bound: past a small cap, extra concurrency only
+        # inflates every request's latency, so the cap sheds load instead.
+        app.state.identify_semaphore = asyncio.Semaphore(config.identify_max_concurrency())
+        logger.info("recognizer loaded into app state")
         yield
 
     app = FastAPI(title="pokeum card recognizer", version=_API_VERSION, lifespan=lifespan)

@@ -60,6 +60,14 @@ class OcrOut(BaseModel):
     confidence: float = 0.0
 
 
+class NameOut(BaseModel):
+    """The card name read from the title band and used during fusion."""
+
+    name: str
+    similarity: float
+    confidence: float
+
+
 class IdentifyResponse(BaseModel):
     """The full response of the identify endpoint."""
 
@@ -67,6 +75,7 @@ class IdentifyResponse(BaseModel):
     match: MatchOut | None = None
     alternates: list[CardOut] = Field(default_factory=list)
     ocr: OcrOut | None = None
+    name: NameOut | None = None
 
 
 class HealthResponse(BaseModel):
@@ -75,27 +84,8 @@ class HealthResponse(BaseModel):
     status: str
     cards_indexed: int
     embedder_loaded: bool
+    embedder_id: str
 
 
 class CardDetailResponse(CardBase):
     """Catalogue detail for a single card."""
-
-
-class ScanAnnotation(BaseModel):
-    """Client-side annotation accompanying an accepted scan upload."""
-
-    schema_version: int
-    consent: bool
-    card_id: str
-    set_id: str
-    number: str
-    status: str
-    variants: list[VariantOut] = Field(default_factory=list)
-    alternate_card_ids: list[str] = Field(default_factory=list)
-    captured_at: str
-
-
-class ScanAccepted(BaseModel):
-    """Acknowledgement that a scan submission was received."""
-
-    accepted: bool

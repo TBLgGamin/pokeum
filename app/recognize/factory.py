@@ -9,7 +9,10 @@ directly with fakes and never touch this module.
 from __future__ import annotations
 
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
+
+import numpy as np
 
 from app.core import config
 from app.recognize.pipeline import Recognizer
@@ -34,6 +37,7 @@ def build_recognizer(
     store: ReferenceStore | None = None,
     with_ocr: bool = True,
     with_symbols: bool = True,
+    warm: bool = True,
 ) -> Recognizer:
     """Build a recognizer from the reference data on disk.
 
@@ -42,6 +46,8 @@ def build_recognizer(
         store: An already-open store to reuse; one is opened when omitted.
         with_ocr: Load the OCR engine (adds startup cost); disable to skip OCR.
         with_symbols: Load the set-symbol matcher.
+        warm: Run one throwaway recognition so the first real request does not
+            pay lazy model initialisation.
 
     Returns:
         A ready-to-use recognizer. Missing embedding indexes simply disable the
@@ -52,7 +58,7 @@ def build_recognizer(
 
     embedder = load_embedder(config.embed_model_path())
     hash_index = index.load_hash_index(store)
-    emb_full, emb_art = index.load_embedding_indexes(root)
+    emb_full, emb_art = index.load_embedding_indexes(root, embedder.identifier)
     ocr_engine = _load_ocr() if with_ocr else None
     symbol_matcher = SymbolMatcher.from_store(store) if with_symbols else None
 
@@ -64,7 +70,7 @@ def build_recognizer(
         "yes" if ocr_engine is not None else "no",
         len(symbol_matcher) if symbol_matcher is not None else 0,
     )
-    return Recognizer(
+    recognizer = Recognizer(
         store,
         hash_index=hash_index,
         embedder=embedder,
@@ -76,6 +82,28 @@ def build_recognizer(
         # inside identify(), so two workers cover the two concurrent branches.
         executor=ThreadPoolExecutor(max_workers=2, thread_name_prefix="recognize"),
     )
+    if warm:
+        _warm_up(recognizer)
+    return recognizer
+
+
+def _warm_up(recognizer: Recognizer) -> None:
+    """Run one throwaway recognition so the first real request is not the slowest.
+
+    ONNX Runtime allocates its arenas and RapidOCR loads its sub-models on first
+    inference. Paying that here moves multiple hundreds of milliseconds off the
+    first user scan, and warms it on the recognizer's own executor threads.
+    """
+    started = time.perf_counter()
+    # Mid-grey noise: no card quad, so the whole-frame path runs every signal.
+    rng = np.random.default_rng(0)
+    frame = rng.integers(96, 160, size=(546, 390, 3), dtype=np.uint8)
+    try:
+        recognizer.identify(frame)
+    except Exception as error:  # noqa: BLE001 - warm-up must never block startup
+        logger.warning("recognizer warm-up failed (%s); continuing cold", error)
+        return
+    logger.info("recognizer warmed in %.0f ms", (time.perf_counter() - started) * 1000)
 
 
 def _load_ocr() -> OcrEngine | None:

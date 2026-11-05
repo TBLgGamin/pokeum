@@ -45,6 +45,11 @@ def bottom_strip(card: np.ndarray) -> np.ndarray:
     return crop_fraction(card, constants.BOTTOM_STRIP_BOX)
 
 
+def title_band(card: np.ndarray) -> np.ndarray:
+    """Return the top band carrying the card's printed name (and stage/HP)."""
+    return crop_fraction(card, constants.TITLE_BAND_BOX)
+
+
 def symbol_zone(card: np.ndarray, era: str) -> np.ndarray:
     """Return the set-symbol region for the given era's layout."""
     box = constants.SYMBOL_ZONE_WOTC if era == ERA_WOTC else constants.SYMBOL_ZONE_MODERN

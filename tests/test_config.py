@@ -62,23 +62,3 @@ def test_webcam_index_default_is_zero(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_scan_debug_dir_defaults_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SCAN_DEBUG_DIR", raising=False)
     assert config.scan_debug_dir() == ""
-
-
-def test_scans_s3_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
-    for key in ("SCANS_S3_BUCKET", "SCANS_S3_REGION", "SCANS_S3_PREFIX", "SCANS_S3_ENDPOINT_URL"):
-        monkeypatch.delenv(key, raising=False)
-    assert config.scans_s3_bucket() == ""
-    assert config.scans_s3_region() == ""
-    assert config.scans_s3_prefix() == "scans"
-    assert config.scans_s3_endpoint_url() == ""
-
-
-def test_scans_s3_values_roundtrip(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("SCANS_S3_BUCKET", "training-data")
-    monkeypatch.setenv("SCANS_S3_REGION", "eu-west-1")
-    monkeypatch.setenv("SCANS_S3_PREFIX", "collected")
-    monkeypatch.setenv("SCANS_S3_ENDPOINT_URL", "http://localhost:9000")
-    assert config.scans_s3_bucket() == "training-data"
-    assert config.scans_s3_region() == "eu-west-1"
-    assert config.scans_s3_prefix() == "collected"
-    assert config.scans_s3_endpoint_url() == "http://localhost:9000"

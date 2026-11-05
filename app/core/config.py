@@ -86,6 +86,11 @@ def api_port() -> int:
     return int(get("API_PORT", "8000"))
 
 
+def identify_max_concurrency() -> int:
+    """How many recognitions may run at once before requests are shed with 503."""
+    return int(get("IDENTIFY_MAX_CONCURRENCY", "2"))
+
+
 def frontend_dist_dir() -> str:
     """Directory of the built frontend served at the root; empty disables serving."""
     return get("FRONTEND_DIST_DIR", "./frontend/dist")
@@ -101,24 +106,3 @@ def webcam_index() -> int:
 def scan_debug_dir() -> str:
     """Directory where frames that failed card detection are saved; empty disables."""
     return get("SCAN_DEBUG_DIR", "")
-
-
-# --- Scan collection (S3) ---------------------------------------------------
-def scans_s3_bucket() -> str:
-    """S3 bucket accepted scans are uploaded to; empty disables collection."""
-    return get("SCANS_S3_BUCKET", "")
-
-
-def scans_s3_region() -> str:
-    """AWS region of the scans bucket; empty defers to boto3's default chain."""
-    return get("SCANS_S3_REGION", "")
-
-
-def scans_s3_prefix() -> str:
-    """Key prefix under which scan objects are stored in the bucket."""
-    return get("SCANS_S3_PREFIX", "scans")
-
-
-def scans_s3_endpoint_url() -> str:
-    """Custom endpoint URL for S3-compatible stores; empty means real AWS S3."""
-    return get("SCANS_S3_ENDPOINT_URL", "")

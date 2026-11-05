@@ -41,7 +41,41 @@ def test_is_plausible_card_rejects_tiny_region() -> None:
     assert not geometry.is_plausible_card(tiny, frame_area)
 
 
-def test_is_plausible_card_rejects_landscape() -> None:
+def test_is_plausible_card_accepts_a_card_lying_sideways() -> None:
     frame_area = 600.0 * 800.0
-    wide = np.array([[50, 50], [550, 50], [550, 300], [50, 300]], dtype=np.float32)
-    assert not geometry.is_plausible_card(wide, frame_area)
+    sideways = np.array([[50, 50], [470, 50], [470, 350], [50, 350]], dtype=np.float32)
+    assert geometry.is_plausible_card(sideways, frame_area)
+    assert geometry.is_sideways(geometry.order_corners(sideways))
+
+
+def test_is_plausible_card_rejects_a_skewed_quad_in_the_card_band() -> None:
+    # Overall aspect is card-like, but the corners are far from square: a hull of
+    # background clutter, not a card under perspective.
+    frame_area = 600.0 * 800.0
+    skewed = np.array([[100, 100], [400, 300], [400, 700], [100, 500]], dtype=np.float32)
+    assert not geometry.is_plausible_card(skewed, frame_area)
+
+
+def _rotated_card(degrees: float) -> np.ndarray:
+    """Return the corners of a 300x420 portrait card rotated about (400, 400)."""
+    theta = np.deg2rad(degrees)
+    rotation = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
+    upright = np.array([[-150, -210], [150, -210], [150, 210], [-150, 210]], dtype=np.float64)
+    return (upright @ rotation.T + 400).astype(np.float32)
+
+
+def test_order_corners_normalises_any_rotation_to_portrait() -> None:
+    for degrees in (0, 30, 60, 90, 135, 200, 270, 330):
+        ordered = geometry.order_corners(_rotated_card(degrees))
+        top = float(np.linalg.norm(ordered[1] - ordered[0]))
+        left = float(np.linalg.norm(ordered[3] - ordered[0]))
+        assert abs(top - 300) < 1e-3 and abs(left - 420) < 1e-3, degrees
+        assert abs(geometry.aspect_ratio(ordered) - 300 / 420) < 1e-4
+
+
+def test_order_corners_keeps_a_tilted_card_upright() -> None:
+    # Within ±45 degrees of upright the higher short side stays the top, so the
+    # warp needs no 180-degree hypothesis to read the card the right way up.
+    original = _rotated_card(-30)
+    ordered = geometry.order_corners(original)
+    np.testing.assert_allclose(ordered[0], original[0], atol=1e-3)

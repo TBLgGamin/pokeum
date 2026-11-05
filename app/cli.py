@@ -20,6 +20,7 @@ import argparse
 import json
 import logging
 import sys
+from pathlib import Path
 
 from app.core import config
 from app.core.logging_config import configure
@@ -132,6 +133,25 @@ def cmd_eval(args: argparse.Namespace) -> int:
 
     data_dir = _resolve_data_dir(args)
     report = evaluate_folder(args.folder, data_dir=data_dir, top_k=args.top_k)
+    text = json.dumps(report, indent=2)
+    if args.out:
+        Path(args.out).write_text(text, encoding="utf-8")
+        logger.info("wrote eval report to %s", args.out)
+    _emit(text)
+    return 0
+
+
+def cmd_bench(args: argparse.Namespace) -> int:
+    """Handle ``bench``: measure recognition latency and throughput."""
+    from app.recognize.bench import run_bench
+
+    data_dir = _resolve_data_dir(args)
+    report = run_bench(
+        args.image,
+        data_dir=data_dir,
+        requests=args.requests,
+        concurrency=args.concurrency,
+    )
     _emit(json.dumps(report, indent=2))
     return 0
 
@@ -191,7 +211,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval = sub.add_parser("eval", help="score recognition over labelled images")
     p_eval.add_argument("folder", help="folder of '{card_id}__*.jpg' images")
     p_eval.add_argument("--top-k", type=int, default=5, help="top-k for accuracy")
+    p_eval.add_argument("--out", default=None, help="also write the JSON report to this path")
     p_eval.set_defaults(func=cmd_eval)
+
+    p_bench = sub.add_parser("bench", help="measure recognition latency and throughput")
+    p_bench.add_argument("image", help="image recognized on every request")
+    p_bench.add_argument("--requests", type=int, default=20, help="timed recognitions")
+    p_bench.add_argument("--concurrency", type=int, default=2, help="requests in flight")
+    p_bench.set_defaults(func=cmd_bench)
 
     return parser
 

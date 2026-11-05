@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -61,7 +62,10 @@ def test_build_index_hashes_and_embeds(tmp_path: Path) -> None:
     counts = index_module.build_index(store, HistogramEmbedder(), tmp_path)
     assert counts == {"hashed": 2, "embedded": 2}
     assert store.card_ids_missing_hashes() == []
-    assert store.get_meta("embedder_id") == "histogram-v1"
+    manifest = index_module.load_manifest(tmp_path)
+    assert manifest is not None
+    assert manifest["embedder_id"] == "histogram-v1"
+    assert manifest["rows"] == 2
 
 
 def test_loaded_index_retrieves_correct_card(tmp_path: Path) -> None:
@@ -69,7 +73,7 @@ def test_loaded_index_retrieves_correct_card(tmp_path: Path) -> None:
     embedder = HistogramEmbedder()
     index_module.build_index(store, embedder, tmp_path)
 
-    full_index, art_index = index_module.load_embedding_indexes(tmp_path)
+    full_index, art_index = index_module.load_embedding_indexes(tmp_path, embedder.identifier)
     assert full_index is not None and art_index is not None
     card = center_crop_to_card(load_image(tmp_path / "s1-1.png"))
     assert full_index.query(embedder.embed(card), top_k=1)[0].card_id == "s1-1"
@@ -85,3 +89,21 @@ def test_incremental_build_only_adds_new_card(tmp_path: Path) -> None:
     counts = index_module.build_index(store, HistogramEmbedder(), tmp_path)
     assert counts == {"hashed": 1, "embedded": 1}
     assert len(index_module.load_row_ids(tmp_path)) == 3
+
+
+def test_index_refused_for_other_embedder(tmp_path: Path) -> None:
+    store = _seed(tmp_path)
+    index_module.build_index(store, HistogramEmbedder(), tmp_path)
+
+    assert index_module.load_embedding_indexes(tmp_path, "onnx:other:000000000000") == (None, None)
+
+
+def test_index_refused_when_row_ids_disagree_with_matrices(tmp_path: Path) -> None:
+    store = _seed(tmp_path)
+    embedder = HistogramEmbedder()
+    index_module.build_index(store, embedder, tmp_path)
+
+    row_ids_path = index_module.index_dir(tmp_path) / "row_ids.json"
+    row_ids_path.write_text(json.dumps(["s1-1"]), encoding="utf-8")
+
+    assert index_module.load_embedding_indexes(tmp_path, embedder.identifier) == (None, None)

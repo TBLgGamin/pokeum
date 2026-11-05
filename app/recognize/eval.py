@@ -15,11 +15,13 @@ Labelled test sets live under ``data/eval/`` by convention (gitignored):
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
-from app.models import RecognitionResult
+from app.models import RecognitionResult, RecognitionStatus
 from app.recognize.factory import build_recognizer
+from app.recognize.pipeline import Recognizer
 from app.vision.imaging import load_image
 
 logger = logging.getLogger(__name__)
@@ -46,9 +48,10 @@ def evaluate_folder(
         top_k: Rank considered for top-k accuracy.
 
     Returns:
-        A report dict: accuracy (top-1/top-k), verdict counts (confident /
-        uncertain / no_match / no_card), mean confidence and mean margin of the
-        winning card over its runner-up, and the list of misses.
+        A report dict: accuracy (top-1/top-k), same-artwork top-1 accuracy,
+        verdict counts, the wrong-confident and abstained counts, mean
+        confidence and mean margin of the winning card over its runner-up,
+        per-image latency percentiles, and the list of misses.
     """
     root = Path(folder)
     images = sorted(
@@ -59,8 +62,12 @@ def evaluate_folder(
     total = 0
     top1 = 0
     topk = 0
+    artwork_top1 = 0
+    wrong_confident = 0
+    abstained = 0
     confidences: list[float] = []
     margins: list[float] = []
+    latencies: list[float] = []
     statuses: dict[str, int] = {}
     misses: list[dict[str, str]] = []
     for path in images:
@@ -69,13 +76,21 @@ def evaluate_folder(
             logger.warning("skipping unlabelled file: %s", path.name)
             continue
         total += 1
+        started = time.perf_counter()
         result = recognizer.identify(load_image(path), top_k=top_k)
+        latencies.append((time.perf_counter() - started) * 1000.0)
         statuses[result.status.value] = statuses.get(result.status.value, 0) + 1
         ranked = _ranked_ids(result)
         if result.match is not None:
             confidences.append(result.match.confidence)
             runner_up = result.alternates[0].confidence if result.alternates else 0.0
             margins.append(result.match.confidence - runner_up)
+        if _same_artwork(recognizer, truth, result):
+            artwork_top1 += 1
+        if result.status is RecognitionStatus.CONFIDENT and ranked[:1] != [truth]:
+            wrong_confident += 1
+        if result.status in (RecognitionStatus.NO_MATCH, RecognitionStatus.NO_CARD_DETECTED):
+            abstained += 1
         if ranked[:1] == [truth]:
             top1 += 1
         if truth in ranked:
@@ -90,11 +105,57 @@ def evaluate_folder(
         "top1_accuracy": round(top1 / total, 3) if total else 0.0,
         "topk_accuracy": round(topk / total, 3) if total else 0.0,
         "top_k": top_k,
+        "artwork_top1": artwork_top1,
+        "artwork_top1_accuracy": round(artwork_top1 / total, 3) if total else 0.0,
+        "wrong_confident": wrong_confident,
+        "abstained": abstained,
         "verdicts": statuses,
         "mean_confidence": round(sum(confidences) / len(confidences), 3) if confidences else 0.0,
         "mean_margin": round(sum(margins) / len(margins), 3) if margins else 0.0,
+        "latency_ms": latency_summary(latencies),
         "misses": misses,
     }
+
+
+def latency_summary(latencies: list[float]) -> dict[str, float]:
+    """Return ``p50``/``p95``/``mean``/``max`` milliseconds for timed calls.
+
+    Args:
+        latencies: Per-call durations in milliseconds, in any order.
+
+    Returns:
+        The rounded summary; all zeros when no call was timed.
+    """
+    if not latencies:
+        return {"p50": 0.0, "p95": 0.0, "mean": 0.0, "max": 0.0}
+    ordered = sorted(latencies)
+    return {
+        "p50": round(_percentile(ordered, 0.5), 1),
+        "p95": round(_percentile(ordered, 0.95), 1),
+        "mean": round(sum(ordered) / len(ordered), 1),
+        "max": round(ordered[-1], 1),
+    }
+
+
+def _percentile(ordered: list[float], quantile: float) -> float:
+    """Return the nearest-rank percentile of an already-sorted list."""
+    return ordered[int(round((len(ordered) - 1) * quantile))]
+
+
+def _same_artwork(recognizer: Recognizer, truth: str, result: RecognitionResult) -> bool:
+    """Report whether the top-ranked card shares the truth card's artwork name.
+
+    Card name equality is the project's same-artwork proxy: reprints of one
+    illustration share a name across sets, so this separates "wrong artwork"
+    from "right artwork, wrong printing".
+    """
+    if result.match is None:
+        return False
+    truth_card = recognizer.store.get_card(truth)
+    if truth_card is None:
+        logger.warning("labelled card %s is not in the catalogue; counting as a miss", truth)
+        return False
+    return result.match.card.name == truth_card.name
 
 
 def _ranked_ids(result: RecognitionResult) -> list[str]:

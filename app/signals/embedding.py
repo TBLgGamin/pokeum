@@ -19,8 +19,9 @@ library needed).
 
 from __future__ import annotations
 
+import hashlib
 import logging
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 import numpy as np
@@ -98,8 +99,17 @@ class OnnxEmbedder:
         import onnxruntime as ort
 
         self._path = Path(model_path)
-        self.identifier = f"onnx:{self._path.name}"
-        self._session = ort.InferenceSession(str(self._path), providers=["CPUExecutionProvider"])
+        with self._path.open("rb") as handle:
+            self.sha256 = hashlib.file_digest(handle, "sha256").hexdigest()
+        # Content-addressed: swapping weights under the same filename must still
+        # invalidate the index, whose vectors are only comparable within a model.
+        self.identifier = f"onnx:{self._path.name}:{self.sha256[:12]}"
+        opts = ort.SessionOptions()
+        opts.intra_op_num_threads = constants.EMBED_INTRA_OP_THREADS
+        opts.inter_op_num_threads = constants.EMBED_INTER_OP_THREADS
+        self._session = ort.InferenceSession(
+            str(self._path), opts, providers=["CPUExecutionProvider"]
+        )
         self._input_name = self._session.get_inputs()[0].name
         size = constants.EMBED_INPUT_SIZE
         probe = self._run(np.zeros((1, 3, size, size), dtype=np.float32))
@@ -116,10 +126,10 @@ class OnnxEmbedder:
     def _preprocess(self, image: np.ndarray) -> np.ndarray:
         """Resize and normalize one RGB image to a ``(3, S, S)`` float32 tensor."""
         size = constants.EMBED_INPUT_SIZE
-        pil = Image.fromarray(np.asarray(image, dtype=np.uint8), mode="RGB")
+        pil = Image.fromarray(image, mode="RGB")
         arr = np.asarray(pil.resize((size, size)), dtype=np.float32) / 255.0
         arr = (arr - _IMAGENET_MEAN) / _IMAGENET_STD
-        return np.transpose(arr, (2, 0, 1)).astype(np.float32)
+        return np.transpose(arr, (2, 0, 1))
 
     def _run(self, batch: np.ndarray) -> np.ndarray:
         """Run the session over an ``(N, 3, S, S)`` batch, returning ``(N, D)``."""
@@ -202,6 +212,8 @@ class EmbeddingIndex:
         """
         self.card_ids = card_ids
         self.matrix = matrix.astype(np.float32) if matrix.size else matrix
+        # Built on first subset lookup only; full scans never need it.
+        self._rows: dict[str, int] | None = None
 
     def __len__(self) -> int:
         """Return the number of indexed cards."""
@@ -226,3 +238,34 @@ class EmbeddingIndex:
         scores = np.clip((cosine + 1.0) / 2.0, 0.0, 1.0)
         order = np.argsort(scores)[::-1][:top_k]
         return [SignalScore(self.card_ids[i], float(scores[i])) for i in order]
+
+    def scores_for(self, vector: np.ndarray, card_ids: Iterable[str]) -> list[SignalScore]:
+        """Score a named subset of cards against one query embedding.
+
+        Used for the OCR-filter second pass: a card whose collector number the
+        OCR read is worth scoring even when it missed the global shortlist.
+
+        Args:
+            vector: A query embedding (need not be pre-normalized).
+            card_ids: Cards to score; ids absent from the index are skipped.
+
+        Returns:
+            One score per known id, best first, scored in ``[0, 1]``.
+        """
+        if not self.card_ids or self.matrix.size == 0:
+            return []
+        rows = self._row_index()
+        picked = [(cid, rows[cid]) for cid in card_ids if cid in rows]
+        if not picked:
+            return []
+        query = l2_normalize(vector)
+        cosine = self.matrix[[row for _, row in picked]] @ query
+        scores = np.clip((cosine + 1.0) / 2.0, 0.0, 1.0)
+        order = np.argsort(scores)[::-1]
+        return [SignalScore(picked[i][0], float(scores[i])) for i in order]
+
+    def _row_index(self) -> dict[str, int]:
+        """Return a lazily built ``{card_id: row}`` map for subset lookups."""
+        if self._rows is None:
+            self._rows = {cid: row for row, cid in enumerate(self.card_ids)}
+        return self._rows
