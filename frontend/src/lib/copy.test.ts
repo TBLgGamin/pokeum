@@ -1,44 +1,61 @@
 import { describe, expect, it } from "vitest";
 
 import { ApiError } from "@/lib/api";
-import { cardCode, cardCount, noResultMessage, scanErrorMessage, variantLabel } from "@/lib/copy";
+import {
+  cardCode,
+  cardCount,
+  noResultMessage,
+  scanErrorMessage,
+  variantLabel,
+} from "@/lib/copy";
 
 describe("noResultMessage", () => {
   it("tells the user where to put the card when none was found", () => {
-    expect(noResultMessage("no_card_detected")).toBe("No card found. Center it in the frame.");
+    expect(noResultMessage("no_card_detected")).toBe(
+      "No card found. Center it in the frame.",
+    );
   });
 
   it("asks for a steadier angle for every other miss", () => {
     expect(noResultMessage("no_match")).toBe("No match. Try a steadier angle.");
-    expect(noResultMessage("uncertain")).toBe("No match. Try a steadier angle.");
+    expect(noResultMessage("uncertain")).toBe(
+      "No match. Try a steadier angle.",
+    );
   });
 });
 
 describe("scanErrorMessage", () => {
   it("separates a busy recognizer, a lost connection and everything else", () => {
-    expect(scanErrorMessage(new ApiError(503, "identify failed: HTTP 503"))).toBe(
-      "Recognizer is busy. Try again.",
-    );
+    expect(
+      scanErrorMessage(new ApiError(503, "identify failed: HTTP 503")),
+    ).toBe("Recognizer is busy. Try again.");
     expect(scanErrorMessage(new TypeError("Failed to fetch"))).toBe(
       "Can't reach the recognizer. Check your connection.",
     );
-    expect(scanErrorMessage(new ApiError(500, "identify failed: HTTP 500"))).toBe(
-      "Scan failed. Try again.",
-    );
+    expect(
+      scanErrorMessage(new ApiError(500, "identify failed: HTTP 500")),
+    ).toBe("Scan failed. Try again.");
     expect(scanErrorMessage("boom")).toBe("Scan failed. Try again.");
   });
 
   it("never leaks the HTTP detail into the copy", () => {
-    expect(scanErrorMessage(new ApiError(400, "identify failed: HTTP 400"))).not.toMatch(/HTTP/);
+    expect(
+      scanErrorMessage(new ApiError(400, "identify failed: HTTP 400")),
+    ).not.toMatch(/HTTP/);
   });
 });
 
 describe("cardCode", () => {
   it("joins the set code and number, and falls back to the number alone", () => {
-    expect(cardCode({ set: { id: "sv02", name: "Paldea Evolved", code: "PAL" }, number: "025" })).toBe(
-      "PAL · 025",
-    );
-    expect(cardCode({ set: { id: "np", name: "Promos", code: null }, number: "1" })).toBe("1");
+    expect(
+      cardCode({
+        set: { id: "sv02", name: "Paldea Evolved", code: "PAL" },
+        number: "025",
+      }),
+    ).toBe("PAL · 025");
+    expect(
+      cardCode({ set: { id: "np", name: "Promos", code: null }, number: "1" }),
+    ).toBe("1");
   });
 });
 

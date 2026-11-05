@@ -14,7 +14,6 @@ import {
 
 import type { CandidateOut } from "@/lib/api";
 import {
-  clearCollection,
   loadCollection,
   requestPersistentStorage,
   saveCollection,
@@ -34,8 +33,6 @@ export interface Collection {
   add: (card: CandidateOut) => void;
   /** Change a card's quantity by `delta`; reaching zero removes it. */
   adjust: (cardId: string, delta: number) => void;
-  /** Forget every card, on screen and on disk. */
-  clear: () => void;
 }
 
 /**
@@ -48,7 +45,9 @@ export interface Collection {
  */
 export function createCollection(): Collection {
   const entries = ref<ScanEntry[]>(loadCollection());
-  const totalCards = computed(() => entries.value.reduce((sum, entry) => sum + entry.quantity, 0));
+  const totalCards = computed(() =>
+    entries.value.reduce((sum, entry) => sum + entry.quantity, 0),
+  );
 
   let saveTimer: number | undefined;
   let persistenceRequested = false;
@@ -60,7 +59,8 @@ export function createCollection(): Collection {
   }
 
   function flush(): void {
-    if (document.visibilityState === "hidden" || saveTimer !== undefined) persist();
+    if (document.visibilityState === "hidden" || saveTimer !== undefined)
+      persist();
   }
 
   watch(
@@ -83,16 +83,24 @@ export function createCollection(): Collection {
   });
 
   function add(card: CandidateOut): void {
-    const existing = entries.value.find((entry) => entry.card.card_id === card.card_id);
+    const existing = entries.value.find(
+      (entry) => entry.card.card_id === card.card_id,
+    );
     if (existing) {
       existing.quantity += 1;
     } else {
-      entries.value.unshift({ card, quantity: 1, scannedAt: new Date().toISOString() });
+      entries.value.unshift({
+        card,
+        quantity: 1,
+        scannedAt: new Date().toISOString(),
+      });
     }
   }
 
   function adjust(cardId: string, delta: number): void {
-    const index = entries.value.findIndex((entry) => entry.card.card_id === cardId);
+    const index = entries.value.findIndex(
+      (entry) => entry.card.card_id === cardId,
+    );
     if (index < 0) return;
     const quantity = entries.value[index].quantity + delta;
     if (quantity <= 0) {
@@ -102,12 +110,7 @@ export function createCollection(): Collection {
     }
   }
 
-  function clear(): void {
-    entries.value = [];
-    clearCollection();
-  }
-
-  return { entries, totalCards, add, adjust, clear };
+  return { entries, totalCards, add, adjust };
 }
 
 const collectionKey: InjectionKey<Collection> = Symbol("collection");
@@ -122,6 +125,7 @@ export function provideCollection(): Collection {
 /** The collection provided by an ancestor (`App.vue`). */
 export function useCollection(): Collection {
   const collection = inject(collectionKey);
-  if (!collection) throw new Error("useCollection() needs provideCollection() in an ancestor");
+  if (!collection)
+    throw new Error("useCollection() needs provideCollection() in an ancestor");
   return collection;
 }

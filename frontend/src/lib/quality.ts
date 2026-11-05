@@ -19,11 +19,26 @@ is needed than the raw numbers suggest.
  */
 export const QUALITY_SAMPLE_WIDTH = 160;
 
-/** Minimum Laplacian variance: below this the card's text is mush. */
-export const SHARPNESS_MIN = 60;
+/**
+ * Minimum Laplacian variance: below this the card's text is mush.
+ *
+ * Set for a hand-held phone, not a tripod: the server rectifies, refines and
+ * (when unsure) asks for a burst, so a frame only has to be readable, not crisp.
+ */
+export const SHARPNESS_MIN = 35;
 
 /** Maximum mean absolute frame-to-frame difference tolerated as "still". */
-export const MOTION_MAX = 6;
+export const MOTION_MAX = 10;
+
+/**
+ * Motion below this counts as "settled": the card is held in the guide with
+ * normal hand tremor. Enough settled samples capture even if no single pair of
+ * samples was perfectly still (see `PATIENCE_SAMPLES`).
+ */
+export const MOTION_SETTLED_MAX = 22;
+
+/** Least detail a settled sample needs to count as "a card is there" (an empty table is flat). */
+export const PATIENCE_SHARPNESS_MIN = 12;
 
 /** Mean luma below this is too dark for OCR and the set symbol. */
 export const BRIGHTNESS_MIN = 50;
@@ -31,13 +46,21 @@ export const BRIGHTNESS_MIN = 50;
 /** Mean luma above this means glare is washing the card out. */
 export const BRIGHTNESS_MAX = 210;
 
+/** Consecutive good samples before auto-capture fires (~0.2 s at 100 ms). */
+export const STABLE_SAMPLES_REQUIRED = 2;
+
 /**
- * Consecutive good samples before auto-capture fires.
- *
- * Three at the sampling interval is roughly half a second of stillness: long
- * enough to skip the hand's settling wobble, short enough to feel instant.
+ * Consecutive settled, well-exposed samples after which auto-capture fires
+ * anyway (~0.6 s). A shaky hand never produces a textbook-still streak; the
+ * server copes with a slightly soft frame, so waiting longer only annoys.
  */
-export const STABLE_SAMPLES_REQUIRED = 3;
+export const PATIENCE_SAMPLES = 6;
+
+/**
+ * Consecutive samples a problem must persist before its hint is shown, so a
+ * single wobble does not flash "Hold still" (~0.4 s).
+ */
+export const HINT_AFTER_SAMPLES = 4;
 
 /**
  * Consecutive moving/blurry samples that re-arm auto-capture after a result.
@@ -70,7 +93,11 @@ export function toGray(sample: FrameSample): Uint8ClampedArray {
  * stays near zero and the variance collapses; edges push it up sharply.
  * Frames too small to have an interior score 0.
  */
-export function sharpness(gray: Uint8ClampedArray, width: number, height: number): number {
+export function sharpness(
+  gray: Uint8ClampedArray,
+  width: number,
+  height: number,
+): number {
   if (width < 3 || height < 3) return 0;
   let sum = 0;
   let sumSquares = 0;
@@ -80,7 +107,11 @@ export function sharpness(gray: Uint8ClampedArray, width: number, height: number
     for (let x = 1; x < width - 1; x += 1) {
       const i = row + x;
       const laplacian =
-        4 * gray[i] - gray[i - 1] - gray[i + 1] - gray[i - width] - gray[i + width];
+        4 * gray[i] -
+        gray[i - 1] -
+        gray[i + 1] -
+        gray[i - width] -
+        gray[i + width];
       sum += laplacian;
       sumSquares += laplacian * laplacian;
       count += 1;
@@ -92,8 +123,12 @@ export function sharpness(gray: Uint8ClampedArray, width: number, height: number
 }
 
 /** Mean absolute luma difference against the previous sample; 0 without a comparable one. */
-export function motion(prev: Uint8ClampedArray | null, gray: Uint8ClampedArray): number {
-  if (prev === null || prev.length !== gray.length || gray.length === 0) return 0;
+export function motion(
+  prev: Uint8ClampedArray | null,
+  gray: Uint8ClampedArray,
+): number {
+  if (prev === null || prev.length !== gray.length || gray.length === 0)
+    return 0;
   let total = 0;
   for (let i = 0; i < gray.length; i += 1) {
     total += Math.abs(gray[i] - prev[i]);
@@ -112,7 +147,8 @@ export function brightness(gray: Uint8ClampedArray): number {
 }
 
 /**
- * Judge one sampled frame, returning its gray buffer for the next comparison.
+ * Judge one sampled frame, returning its gray buffer for the next comparison
+ * plus the raw motion and sharpness (for the patience path).
  *
  * Checks run cheapest-and-most-actionable first: exposure problems are what
  * the user can fix instantly, motion invalidates any sharpness reading, and
@@ -121,16 +157,42 @@ export function brightness(gray: Uint8ClampedArray): number {
 export function assessFrame(
   prev: Uint8ClampedArray | null,
   sample: FrameSample,
-): { verdict: FrameVerdict; gray: Uint8ClampedArray } {
+): {
+  verdict: FrameVerdict;
+  gray: Uint8ClampedArray;
+  motion: number;
+  sharpness: number;
+} {
   const gray = toGray(sample);
   const level = brightness(gray);
-  if (level < BRIGHTNESS_MIN) return { verdict: "dark", gray };
-  if (level > BRIGHTNESS_MAX) return { verdict: "bright", gray };
-  if (motion(prev, gray) > MOTION_MAX) return { verdict: "moving", gray };
-  if (sharpness(gray, sample.width, sample.height) < SHARPNESS_MIN) {
-    return { verdict: "blurry", gray };
-  }
-  return { verdict: "ok", gray };
+  if (level < BRIGHTNESS_MIN)
+    return { verdict: "dark", gray, motion: 0, sharpness: 0 };
+  if (level > BRIGHTNESS_MAX)
+    return { verdict: "bright", gray, motion: 0, sharpness: 0 };
+  const moved = motion(prev, gray);
+  const focus = sharpness(gray, sample.width, sample.height);
+  if (moved > MOTION_MAX)
+    return { verdict: "moving", gray, motion: moved, sharpness: focus };
+  if (focus < SHARPNESS_MIN)
+    return { verdict: "blurry", gray, motion: moved, sharpness: focus };
+  return { verdict: "ok", gray, motion: moved, sharpness: focus };
+}
+
+/**
+ * Whether a sample counts towards the patience path: settled in the guide,
+ * and with enough detail that a card (not an empty table) is there.
+ */
+export function isSettled(result: {
+  verdict: FrameVerdict;
+  motion: number;
+  sharpness: number;
+}): boolean {
+  return (
+    result.verdict !== "dark" &&
+    result.verdict !== "bright" &&
+    result.motion <= MOTION_SETTLED_MAX &&
+    result.sharpness >= PATIENCE_SHARPNESS_MIN
+  );
 }
 
 const HINTS: Record<FrameVerdict, string> = {

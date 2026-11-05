@@ -23,7 +23,14 @@ watch(
 
 <template>
   <!-- Decorative: the card's name and set are always printed next to its art. -->
-  <span :class="cn('block aspect-[63/88] overflow-hidden rounded-[4.5%/3.2%] bg-muted', props.class)">
+  <span
+    :class="
+      cn(
+        'block aspect-[63/88] overflow-hidden rounded-[4.5%/3.2%] bg-muted',
+        props.class,
+      )
+    "
+  >
     <img
       v-if="!failed"
       :src="cardArtUrl(card)"

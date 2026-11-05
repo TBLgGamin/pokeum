@@ -5,7 +5,12 @@ import { computed, ref, watch } from "vue";
 
 import CardArt from "@/components/CardArt.vue";
 import { Button } from "@/components/ui/button";
-import { Item, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemTitle,
+} from "@/components/ui/item";
 import {
   Sheet,
   SheetContent,
@@ -53,7 +58,9 @@ watch(
 
 /** The printings on offer: the match first, then its ranked alternates. */
 const options = computed<CandidateOut[]>(() =>
-  shown.value ? [shown.value.match, ...shown.value.result.alternates].slice(0, 5) : [],
+  shown.value
+    ? [shown.value.match, ...shown.value.result.alternates].slice(0, 5)
+    : [],
 );
 
 /** Land on "Save card" so a keyboard user confirms with Enter; the chooser keeps its default. */
@@ -66,7 +73,10 @@ function focusSave(event: Event): void {
 </script>
 
 <template>
-  <Sheet :open="scan !== null" @update:open="(open: boolean) => !open && emit('dismiss')">
+  <Sheet
+    :open="scan !== null"
+    @update:open="(open: boolean) => !open && emit('dismiss')"
+  >
     <SheetContent
       :side="isWide ? 'right' : 'bottom'"
       class="gap-0"
@@ -77,13 +87,19 @@ function focusSave(event: Event): void {
         <template v-if="choosing">
           <SheetHeader class="p-4 pr-16">
             <SheetTitle class="text-xl leading-tight">
-              {{ shown.result.status === "ambiguous" ? "Which printing?" : "Pick the right card" }}
+              {{
+                shown.result.status === "ambiguous"
+                  ? "Hmmmm… which printing is it?"
+                  : "Hmmmm… maybe one of these?"
+              }}
             </SheetTitle>
             <SheetDescription class="sr-only">
               Choose the card you scanned, or dismiss to scan again.
             </SheetDescription>
           </SheetHeader>
-          <ul class="flex min-h-0 flex-col overflow-y-auto overscroll-contain pb-4">
+          <ul
+            class="flex min-h-0 flex-col overflow-y-auto overscroll-contain pb-4"
+          >
             <li v-for="option in options" :key="option.card_id">
               <Item
                 as="button"
@@ -117,17 +133,27 @@ function focusSave(event: Event): void {
                 <CircleHelp class="size-4 shrink-0" aria-hidden="true" />
                 Low confidence
               </p>
-              <SheetTitle class="text-xl leading-tight">{{ shown.match.name }}</SheetTitle>
-              <SheetDescription class="text-base">{{ shown.match.set.name }}</SheetDescription>
-              <p class="text-sm text-muted-foreground tabular-nums">{{ cardCode(shown.match) }}</p>
+              <SheetTitle class="text-xl leading-tight">{{
+                shown.match.name
+              }}</SheetTitle>
+              <SheetDescription class="text-base">{{
+                shown.match.set.name
+              }}</SheetDescription>
+              <p class="text-sm text-muted-foreground tabular-nums">
+                {{ cardCode(shown.match) }}
+              </p>
               <p v-if="variantLabel(shown.match)" class="pt-1 text-sm">
                 {{ variantLabel(shown.match) }}
               </p>
             </div>
           </div>
           <SheetFooter class="grid grid-cols-2 gap-3 p-4 pt-2">
-            <Button variant="outline" size="lg" @click="choosing = true">Not this one</Button>
-            <Button ref="saveButton" size="lg" @click="emit('save')">Save card</Button>
+            <Button variant="outline" size="lg" @click="choosing = true"
+              >Not this one</Button
+            >
+            <Button ref="saveButton" size="lg" @click="emit('save')"
+              >Save card</Button
+            >
           </SheetFooter>
         </template>
       </template>

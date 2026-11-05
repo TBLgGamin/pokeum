@@ -12,14 +12,15 @@ collection on the device. It talks to the same endpoints the CLI drives (see
 [service-and-cli](service-and-cli.md)) and shows nothing the recognizer does
 not return.
 
-A Vue 3 + TypeScript app on Tailwind v4 and shadcn-vue. **Two screens share one
-header**: [`AppHeader.vue`](../frontend/src/components/AppHeader.vue) holds the
-Lens P lockup and two tab links, `#scan` and `#collection` (the second shows the
-card count), and [`App.vue`](../frontend/src/App.vue) swaps the view under it —
-the scanner is a fixed-height viewfinder, the collection an ordinary scrolling
-page. The screen lives in the URL hash ([`useView.ts`](../frontend/src/composables/useView.ts)),
-so the platform Back button steps from the collection to the scanner instead of
-closing an installed app.
+A Vue 3 + TypeScript app on Tailwind v4 and shadcn-vue. **Three screens share
+one header**: [`AppHeader.vue`](../frontend/src/components/AppHeader.vue) holds
+the Lens P symbol (no wordmark) flush left, then three tab links — `#scan`,
+`#upload`, `#collection` (with the card count) — and a GitHub icon linking to the
+repository, flush right. [`App.vue`](../frontend/src/App.vue) swaps the view
+under it — the scanner is a fixed-height viewfinder, upload and collection are
+ordinary scrolling pages. The screen lives in the URL hash
+([`useView.ts`](../frontend/src/composables/useView.ts)), so the platform Back
+button steps between screens instead of closing an installed app.
 
 ```
 src/
@@ -27,35 +28,37 @@ src/
   components/
     AppHeader.vue  BrandLogo.vue  CardArt.vue
     scan/        ScanView.vue  ScanFrame.vue  ShutterButton.vue  MatchSheet.vue
+    upload/      UploadView.vue
     collection/  CollectionView.vue
-    ui/          shadcn-vue output: button switch label sheet alert-dialog item empty separator
+    ui/          shadcn-vue output: button sheet dropdown-menu input item empty separator
   composables/   useScanSession  useCamera  useAutoCapture  useCollection  useView
-  lib/           api quality image capture collection exporters copy preferences haptics
+  lib/           api quality image capture collection exporters copy haptics
 ```
 
 ## Scan screen
 
 [`ScanView.vue`](../frontend/src/components/scan/ScanView.vue) is the viewfinder
-(the camera preview, a size container) above one control strip. **One status
-line** (`role=status`) is the single place the scanner talks; in priority order
-it shows *Recognizing…*, *Starting camera…*, the auto-capture coaching hint
-("Hold still", "More light", "Reduce glare"), *Saved <name>* (4 s), the last
+(the camera preview, a size container) above the shutter. **One status notch**
+(`role=status`, always mounted) is the single place the scanner talks: a tab with
+rounded bottom corners that slides down from under the header while there is
+something to say and tucks back up when there is not. In priority order it shows
+*Recognizing…*, *Starting camera…*, the auto-capture coaching hint ("Hold
+still", "More light", "Reduce glare"), *Saved <name>* (4 s), then the last
 failure in plain words ([`copy.ts`](../frontend/src/lib/copy.ts): no card, no
-match, recognizer busy on `503`, server unreachable), then the idle prompt. The
-strip is Upload photo · shutter · Auto-scan switch. The shutter is a
-lens-and-pupil ring in neutral tokens — the old red/white pokéball is gone on
-purpose: the brand guidelines forbid Pokémon trade dress next to the mark.
-[`ScanFrame.vue`](../frontend/src/components/scan/ScanFrame.vue) is the guide, a
-light outline sized from the viewfinder with container units (72% of its width,
-never taller than 78% of its height, card aspect 63:88) that sweeps a line while
-a request is in flight (a static line under reduced motion). With the camera
-denied or absent the viewfinder shows an empty state with *Try again*, and Upload
-becomes the full-width primary action.
+match, recognizer busy on `503`, server unreachable); idle, it is hidden. The
+shutter is a lens-and-pupil ring in neutral tokens — the old red/white pokéball
+is gone on purpose: the brand guidelines forbid Pokémon trade dress next to the
+mark. [`ScanFrame.vue`](../frontend/src/components/scan/ScanFrame.vue) is the
+guide, a light outline sized from the viewfinder with container units (72% of
+its width, never taller than 78% of its height, card aspect 63:88) that sweeps a
+line while a request is in flight (a static line under reduced motion). With the
+camera denied or absent the viewfinder shows an empty state with *Try again*, and
+the shutter becomes a full-width *Upload a photo instead* link to `#upload`.
 
 **Capture → identify is one seam.**
 [`useScanSession.ts`](../frontend/src/composables/useScanSession.ts) owns it:
 `scanCamera()` (guide crop via [`capture.ts`](../frontend/src/lib/capture.ts))
-and `scanFile()` (library photo, downscaled) both end in `recognize()`, the only
+and `scanFile()` (uploaded photo, downscaled) both end in `recognize()`, the only
 caller of `identify()` and `identifyBurst()`. A camera scan whose first frame is
 not `confident` captures `BURST_EXTRA_FRAMES` (2) more guide crops
 `BURST_FRAME_GAP_MS` (80 ms) apart and re-asks `POST /api/identify/burst` with
@@ -73,27 +76,30 @@ verdict shows the card's art, name, set, `code · number` and any variant traits
 with *Save card* (focused, so Enter confirms) and *Not this one*; `uncertain` adds
 a *Low confidence* line. An `ambiguous` verdict settles the artwork but not the
 printing (see [recognition-pipeline](recognition-pipeline.md)), so it opens
-straight into the printing chooser — `[match, ...alternates]`, at most five rows
-— and *Not this one* opens the same list. Picking a row saves that printing. The
+straight into the chooser, titled "Hmmmm… which printing is it?" —
+`[match, ...alternates]`, at most five rows — and *Not this one* opens the same
+list as "Hmmmm… maybe one of these?". Picking a row saves that printing. The
 close button, Esc and a tap outside dismiss without saving. No numeric confidence
 is shown, by design: the fused score is not a calibrated probability, so only the
 verdicts that change the decision (`uncertain`, `ambiguous`) surface, in words.
 
-**Auto-capture:** the scanner fires by itself once the frame is worth sending,
-so a stack can be worked through without tapping. The metrics are pure and
+**Auto-capture is always on** (there is no toggle): the scanner fires by itself
+once the frame is worth sending, so a stack can be worked through without
+tapping; the shutter remains for an immediate scan. The metrics are pure and
 unit-tested in [`quality.ts`](../frontend/src/lib/quality.ts) (Rec. 601 luma,
 Laplacian-variance sharpness, mean absolute frame difference for motion, mean
-brightness; thresholds are tuned for the 160px downscaled sample); the sampling
-loop and arm/disarm machine are in
+brightness; thresholds are tuned for the 160px downscaled sample and for a
+hand-held phone); the sampling loop and arm/disarm machine are in
 [`useAutoCapture.ts`](../frontend/src/composables/useAutoCapture.ts). It samples
-*the guide crop only* — the pixels that get uploaded — every 150 ms into one
-shared offscreen canvas, reports the failing check through the status line, and
-captures after `STABLE_SAMPLES_REQUIRED` good samples (~half a second of
-stillness). Any result, camera or uploaded photo, disarms it; only
+*the guide crop only* — the pixels that get uploaded — every 100 ms into one
+shared offscreen canvas and captures after `STABLE_SAMPLES_REQUIRED` (2) good
+samples, or after `PATIENCE_SAMPLES` (6) *settled* ones — well exposed, motion
+under `MOTION_SETTLED_MAX`, enough detail to be a card — so normal hand tremor
+never stalls it; the server's burst path absorbs a slightly soft frame. A
+problem must persist `HINT_AFTER_SAMPLES` (4) samples before its hint shows, and
+a handled card gets no coaching at all. Any result disarms it; only
 `CLEARED_SAMPLES_REQUIRED` moving/blurry samples re-arm it (otherwise a card left
 in the guide would be re-scanned forever) and re-arming clears a stale failure.
-The Auto-scan switch persists in `localStorage` as `pokeum.autoScan`
-([`preferences.ts`](../frontend/src/lib/preferences.ts)).
 
 Camera captures are **cropped to the guide frame**: `captureGuideCrop` maps the
 guide's on-screen rect through the video's `object-cover` geometry to source
@@ -105,6 +111,14 @@ recognizes the inner guide, accepting that fallback only when confident; an
 uncertain result asks for a steadier angle, an `ambiguous` one is left alone (the
 artwork *was* matched). Photo uploads keep the server's whole-frame fallback and
 are downscaled client-side first (max side 1600px).
+
+## Upload screen
+
+[`UploadView.vue`](../frontend/src/components/upload/UploadView.vue) identifies
+one photo at a time: a large pick-or-drop target, an inline status line (*Saved
+<name>* or the failure), and the same match sheet. It runs its own
+`useScanSession` with no camera (`scanFile` only) and saves into the shared
+collection exactly like a scan.
 
 ## Collection
 
@@ -120,17 +134,24 @@ collection renders art from the service-worker cache even offline.
 
 [`CollectionView.vue`](../frontend/src/components/collection/CollectionView.vue)
 is a list, newest scan first: art, name, `set · code · number` and a quantity
-stepper (− removes the last copy, so a wrong save is fixable without clearing
-everything). *Export CSV* downloads a TCGplayer-style file
-([`exporters.ts`](../frontend/src/lib/exporters.ts)); *Clear collection* is a
-quiet destructive link at the end that opens a confirmation naming the count. An
-empty collection shows the mark, "No cards yet" and one *Scan a card* button.
+stepper (− removes the last copy). A note under the title states plainly that the
+collection is **only saved in this browser** (no account, no cloud copy) and to
+export before leaving; a search field filters by every word against name, set,
+set code and number. There is deliberately no "clear all". **Export** opens a
+dropdown of formats from [`exporters.ts`](../frontend/src/lib/exporters.ts)
+(`EXPORT_FORMATS`): *TCGplayer CSV* (Quantity, Name, Set, Card Number, Language,
+Printing — what TCGplayer, Collectr-style and Dragon Shield importers map),
+*Spreadsheet CSV* (every field incl. set code, rarity, card id, date added), *Deck
+list* (Pokémon TCG Live / Limitless lines, `2 Pikachu PAL 025`), *Checklist*
+(readable trade-post text) and *JSON backup* (the stored entries, lossless). No
+condition is ever written: a scanner cannot judge it. An empty collection shows
+the mark, "No cards yet" and one *Scan a card* button.
 
 ## Design system
 
 **Content sits on the page.** No cards, panels or shadows for grouping — spacing,
-type and alignment do it. Only overlays that must float (the sheet, the confirm
-dialog) get the raised `popover` surface plus a hairline border, never a shadow.
+type and alignment do it. Only overlays that must float (the sheet, the export
+menu) get the raised `popover` surface plus a hairline border, never a shadow.
 Icons are `@lucide/vue`; type is Space Grotesk Variable
 (`@fontsource-variable/space-grotesk`, as in mtgfmax).
 
@@ -151,8 +172,8 @@ feed and deliberately do not change with the theme.
 from `npx shadcn-vue@latest add <name>` into `src/components/ui/`. Those files are
 vendored and **locally customised** — no shadows, 40/48 px button heights and a
 press scale ([`button/index.ts`](../frontend/src/components/ui/button/index.ts)),
-a 44×24 switch, the popover surface and half-strength scrim on the sheet and
-alert dialog — so `add --overwrite` reintroduces the defaults; each customised
+the popover surface and half-strength scrim on the sheet, and no shadow on the
+dropdown menu and input (40 px input height) — so `add --overwrite` reintroduces the defaults; each customised
 file opens with a "Customised from…" comment listing what to re-apply.
 
 ## Installable PWA

@@ -29,7 +29,12 @@ export function captureGuideCrop(
         video.videoHeight,
       )
     : null;
-  const source = crop ?? { x: 0, y: 0, width: video.videoWidth, height: video.videoHeight };
+  const source = crop ?? {
+    x: 0,
+    y: 0,
+    width: video.videoWidth,
+    height: video.videoHeight,
+  };
 
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(source.width);

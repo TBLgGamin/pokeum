@@ -14,23 +14,18 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { useAutoCapture } from "@/composables/useAutoCapture";
 import { useCamera } from "@/composables/useCamera";
 import { useCollection } from "@/composables/useCollection";
 import { useScanSession } from "@/composables/useScanSession";
 import type { CandidateOut } from "@/lib/api";
 import { haptic } from "@/lib/haptics";
-import { loadAutoScan, saveAutoScan } from "@/lib/preferences";
 
 /** How long "Saved …" stays in the status line. */
 const SAVED_NOTICE_MS = 4000;
 
 const video = ref<HTMLVideoElement | null>(null);
 const frame = ref<InstanceType<typeof ScanFrame> | null>(null);
-const fileInput = ref<HTMLInputElement | null>(null);
-const autoScan = ref(loadAutoScan());
 const savedName = ref("");
 
 let savedTimer: number | undefined;
@@ -44,12 +39,12 @@ const session = useScanSession({
 });
 const { scanning, pending, failure } = session;
 
-// Hands-free scanning: sample the guide crop and capture the moment the frame
-// is worth sending, so the user only has to hold the card still.
+// Hands-free scanning, always on: sample the guide crop and capture the moment
+// the frame is worth sending, so the user only has to hold the card there.
 const autoCapture = useAutoCapture({
   video,
   getFrameRect: () => frame.value?.getRect() ?? null,
-  enabled: computed(() => autoScan.value && camera.isReady.value && !pending.value),
+  enabled: computed(() => camera.isReady.value && !pending.value),
   busy: scanning,
   onStable: scan,
 });
@@ -86,14 +81,19 @@ interface Status {
   icon?: "saved" | "alert";
 }
 
-/** The one line that says what the scanner is doing, in priority order. */
+/**
+ * The one line that says what the scanner is doing, in priority order. Empty
+ * means "nothing to say": the notch tucks away and the guide frame speaks.
+ */
 const status = computed<Status>(() => {
   if (scanning.value) return { text: "Recognizing…", tone: "default" };
-  if (camera.state.value === "starting") return { text: "Starting camera…", tone: "muted" };
-  if (autoScan.value && camera.isReady.value && autoCapture.hint.value) {
+  if (camera.state.value === "starting")
+    return { text: "Starting camera…", tone: "muted" };
+  if (camera.isReady.value && autoCapture.hint.value) {
     return { text: autoCapture.hint.value, tone: "default" };
   }
-  if (savedName.value) return { text: `Saved ${savedName.value}`, tone: "default", icon: "saved" };
+  if (savedName.value)
+    return { text: `Saved ${savedName.value}`, tone: "default", icon: "saved" };
   if (failure.value) {
     return {
       text: failure.value.message,
@@ -101,11 +101,7 @@ const status = computed<Status>(() => {
       icon: "alert",
     };
   }
-  if (camera.state.value === "unavailable") return { text: "", tone: "muted" };
-  return {
-    text: autoScan.value ? "Hold a card in the frame" : "Frame a card, then tap Scan",
-    tone: "muted",
-  };
+  return { text: "", tone: "muted" };
 });
 
 /** Any outcome means this card has been tried; auto-capture re-arms once the frame changes. */
@@ -113,26 +109,6 @@ async function scan(): Promise<void> {
   haptic(12);
   await session.scanCamera();
   autoCapture.disarm();
-}
-
-async function onUpload(event: Event): Promise<void> {
-  const input = event.target as HTMLInputElement;
-  const file = input.files?.[0];
-  if (file) {
-    haptic(10);
-    await session.scanFile(file);
-    autoCapture.disarm();
-  }
-  input.value = "";
-}
-
-function setAutoScan(enabled: boolean): void {
-  autoScan.value = enabled;
-  saveAutoScan(enabled);
-  haptic(8);
-  // Turning it back on is an explicit "scan for me": re-arm now instead of
-  // waiting for the frame to change.
-  if (enabled) autoCapture.start();
 }
 
 function save(chosen?: CandidateOut): void {
@@ -156,6 +132,42 @@ function save(chosen?: CandidateOut): void {
       aria-label="Camera"
       class="relative min-h-0 flex-1 overflow-hidden bg-muted [container-type:size] md:rounded-2xl"
     >
+      <!-- The status notch: drops down from under the header while there is
+           something to say, and tucks back up when there is not. The live
+           region stays mounted so screen readers hear every change. -->
+      <div
+        role="status"
+        class="pointer-events-none absolute inset-x-0 top-0 z-10 flex justify-center"
+      >
+        <Transition
+          enter-active-class="transition-transform duration-200 ease-out motion-reduce:transition-none"
+          leave-active-class="transition-transform duration-150 ease-in motion-reduce:transition-none"
+          enter-from-class="-translate-y-full"
+          leave-to-class="-translate-y-full"
+        >
+          <p
+            v-if="status.text"
+            class="flex min-h-9 max-w-[calc(100%-2rem)] items-center gap-2 rounded-b-2xl border border-t-0 bg-background px-4 pb-2 pt-1.5 text-sm font-medium transition-colors"
+            :class="{
+              'text-muted-foreground': status.tone === 'muted',
+              'text-foreground': status.tone === 'default',
+              'text-destructive': status.tone === 'error',
+            }"
+          >
+            <Check
+              v-if="status.icon === 'saved'"
+              class="size-4 shrink-0"
+              aria-hidden="true"
+            />
+            <CircleAlert
+              v-else-if="status.icon === 'alert'"
+              class="size-4 shrink-0"
+              aria-hidden="true"
+            />
+            <span>{{ status.text }}</span>
+          </p>
+        </Transition>
+      </div>
       <video
         ref="video"
         aria-label="Camera preview"
@@ -171,15 +183,21 @@ function save(chosen?: CandidateOut): void {
       >
         <ScanFrame ref="frame" :scanning="scanning" />
       </div>
-      <Empty v-if="camera.state.value === 'unavailable'" class="absolute inset-0">
+      <Empty
+        v-if="camera.state.value === 'unavailable'"
+        class="absolute inset-0"
+      >
         <EmptyHeader>
           <EmptyMedia>
-            <CameraOff class="size-8 text-muted-foreground" aria-hidden="true" />
+            <CameraOff
+              class="size-8 text-muted-foreground"
+              aria-hidden="true"
+            />
           </EmptyMedia>
           <EmptyTitle>Camera unavailable</EmptyTitle>
           <!-- Foreground at 70%, not muted: muted text on the muted viewfinder is 4.4:1 in light mode. -->
           <EmptyDescription class="text-foreground/70">
-            Allow camera access, or upload a photo.
+            Allow camera access, or upload a photo instead.
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>
@@ -188,49 +206,22 @@ function save(chosen?: CandidateOut): void {
       </Empty>
     </section>
 
-    <div class="shrink-0 px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] md:px-0 md:pb-6">
-      <p
-        role="status"
-        class="mb-3 flex min-h-6 items-center justify-center gap-2 text-center text-sm"
-        :class="{
-          'text-muted-foreground': status.tone === 'muted',
-          'text-foreground': status.tone === 'default',
-          'text-destructive': status.tone === 'error',
-        }"
-      >
-        <Check v-if="status.icon === 'saved'" class="size-4 shrink-0" aria-hidden="true" />
-        <CircleAlert v-else-if="status.icon === 'alert'" class="size-4 shrink-0" aria-hidden="true" />
-        <span>{{ status.text }}</span>
-      </p>
-
-      <div
+    <div
+      class="flex shrink-0 justify-center px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] md:px-0 md:pb-6"
+    >
+      <ShutterButton
         v-if="camera.state.value !== 'unavailable'"
-        class="grid grid-cols-[1fr_auto_1fr] items-center gap-2"
-      >
-        <Button
-          variant="ghost"
-          aria-label="Upload photo"
-          class="justify-self-start"
-          :disabled="scanning"
-          @click="fileInput?.click()"
+        :busy="scanning"
+        :disabled="!camera.isReady.value"
+        @click="scan"
+      />
+      <Button v-else as-child size="lg" class="w-full">
+        <a href="#upload"
+          ><ImagePlus aria-hidden="true" />Upload a photo instead</a
         >
-          <ImagePlus aria-hidden="true" />
-          Upload
-        </Button>
-        <ShutterButton :busy="scanning" :disabled="!camera.isReady.value" @click="scan" />
-        <Label class="h-10 cursor-pointer justify-self-end gap-2 pl-2 font-medium">
-          Auto-scan
-          <Switch :model-value="autoScan" @update:model-value="setAutoScan" />
-        </Label>
-      </div>
-      <Button v-else size="lg" class="w-full" :disabled="scanning" @click="fileInput?.click()">
-        <ImagePlus aria-hidden="true" />
-        Upload photo
       </Button>
     </div>
 
     <MatchSheet :scan="pending" @save="save" @dismiss="session.dismiss" />
-
-    <input ref="fileInput" type="file" accept="image/*" hidden @change="onUpload" />
   </main>
 </template>

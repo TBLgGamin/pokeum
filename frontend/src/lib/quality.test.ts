@@ -42,7 +42,9 @@ describe("sharpness", () => {
   });
 
   it("clears the threshold on a hard-edged frame", () => {
-    expect(sharpness(toGray(CHECKS), CHECKS.width, CHECKS.height)).toBeGreaterThan(SHARPNESS_MIN);
+    expect(
+      sharpness(toGray(CHECKS), CHECKS.width, CHECKS.height),
+    ).toBeGreaterThan(SHARPNESS_MIN);
   });
 });
 
@@ -52,14 +54,21 @@ describe("motion", () => {
   });
 
   it("exceeds the threshold against an inverted frame", () => {
-    expect(motion(toGray(CHECKS), toGray(CHECKS_INVERTED))).toBeGreaterThan(MOTION_MAX);
+    expect(motion(toGray(CHECKS), toGray(CHECKS_INVERTED))).toBeGreaterThan(
+      MOTION_MAX,
+    );
     expect(assessFrame(toGray(CHECKS), CHECKS_INVERTED).verdict).toBe("moving");
   });
 });
 
 describe("assessFrame", () => {
   it("reports an unlit frame as dark", () => {
-    expect(assessFrame(null, sample(24, 32, () => 0)).verdict).toBe("dark");
+    expect(
+      assessFrame(
+        null,
+        sample(24, 32, () => 0),
+      ).verdict,
+    ).toBe("dark");
   });
 
   it("passes a still, well-exposed, sharp frame with no hint to show", () => {

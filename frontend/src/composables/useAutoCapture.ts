@@ -12,32 +12,38 @@ import { guideCropSourceRect } from "@/lib/image";
 import {
   assessFrame,
   CLEARED_SAMPLES_REQUIRED,
+  HINT_AFTER_SAMPLES,
   hintFor,
+  isSettled,
+  PATIENCE_SAMPLES,
   QUALITY_SAMPLE_WIDTH,
   STABLE_SAMPLES_REQUIRED,
+  type FrameVerdict,
 } from "@/lib/quality";
 
 /**
  * Sampling period.
  *
- * ~6.7 samples/s: fast enough that `STABLE_SAMPLES_REQUIRED` good frames is
- * half a second of stillness, slow enough to leave the decode thread alone.
+ * 10 samples/s: a 160px-wide sample costs well under a millisecond, and the
+ * faster loop is what lets a capture fire ~0.2 s after the card settles.
  */
-const QUALITY_SAMPLE_INTERVAL_MS = 150;
+const QUALITY_SAMPLE_INTERVAL_MS = 100;
 
 // One offscreen canvas for the whole app: there is a single camera preview,
 // and reallocating a canvas per tick would churn GPU-backed memory. The
 // willReadFrequently hint keeps the surface CPU-side, which is what repeated
 // getImageData wants.
 const sampleCanvas = document.createElement("canvas");
-const sampleContext = sampleCanvas.getContext("2d", { willReadFrequently: true });
+const sampleContext = sampleCanvas.getContext("2d", {
+  willReadFrequently: true,
+});
 
 export interface AutoCaptureOptions {
   /** The live preview element being sampled. */
   video: Ref<HTMLVideoElement | null>;
   /** On-screen rect of the guide frame, or null while it is not rendered. */
   getFrameRect: () => DOMRect | null;
-  /** Sampling runs only while this is true (auto-scan on, camera up, no sheet). */
+  /** Sampling runs only while this is true (camera up, no result sheet open). */
   enabled: Ref<boolean>;
   /** A scan is in flight; samples taken now would race the result. */
   busy: Ref<boolean>;
@@ -66,25 +72,41 @@ export function useAutoCapture(options: AutoCaptureOptions): AutoCapture {
   let timer: number | undefined;
   let prevGray: Uint8ClampedArray | null = null;
   let stableCount = 0;
+  let settledCount = 0;
   let clearedCount = 0;
+  let problem: FrameVerdict = "ok";
+  let problemCount = 0;
+
+  function resetStreaks(): void {
+    stableCount = 0;
+    settledCount = 0;
+    problem = "ok";
+    problemCount = 0;
+    hint.value = "";
+  }
 
   function disarm(): void {
     armed.value = false;
-    stableCount = 0;
     clearedCount = 0;
+    resetStreaks();
   }
 
   function tick(): void {
     if (!options.enabled.value) {
-      // Auto-scan off, camera down, or a result on screen: the streak so far
-      // says nothing about the frame the user will present next.
-      hint.value = "";
+      // Camera down or a result on screen: the streak so far says nothing
+      // about the frame the user will present next.
       prevGray = null;
-      stableCount = 0;
+      resetStreaks();
       return;
     }
     const element = options.video.value;
-    if (options.busy.value || !element || element.videoWidth === 0 || !sampleContext) return;
+    if (
+      options.busy.value ||
+      !element ||
+      element.videoWidth === 0 ||
+      !sampleContext
+    )
+      return;
 
     const frameRect = options.getFrameRect();
     const crop = frameRect
@@ -105,33 +127,61 @@ export function useAutoCapture(options: AutoCaptureOptions): AutoCapture {
       // A different geometry makes the previous buffer incomparable.
       prevGray = null;
     }
-    sampleContext.drawImage(element, crop.x, crop.y, crop.width, crop.height, 0, 0, width, height);
-    const { verdict, gray } = assessFrame(
+    sampleContext.drawImage(
+      element,
+      crop.x,
+      crop.y,
+      crop.width,
+      crop.height,
+      0,
+      0,
+      width,
+      height,
+    );
+    const sample = assessFrame(
       prevGray,
       sampleContext.getImageData(0, 0, width, height),
     );
-    prevGray = gray;
-    hint.value = hintFor(verdict);
+    prevGray = sample.gray;
+    const { verdict } = sample;
 
-    stableCount = verdict === "ok" ? stableCount + 1 : 0;
-    if (armed.value) {
-      if (stableCount >= STABLE_SAMPLES_REQUIRED) {
-        armed.value = false;
-        stableCount = 0;
-        options.onStable();
+    if (!armed.value) {
+      // This card was handled: no coaching, and only real movement re-arms,
+      // so a card left lying in the guide is never scanned twice while
+      // swapping cards resumes hands-free scanning.
+      if (verdict === "moving" || verdict === "blurry") {
+        clearedCount += 1;
+        if (clearedCount >= CLEARED_SAMPLES_REQUIRED) {
+          armed.value = true;
+          clearedCount = 0;
+          resetStreaks();
+        }
+      } else {
+        clearedCount = 0;
       }
       return;
     }
-    // Disarmed: only real movement re-arms, so a card left lying in the guide
-    // is never scanned twice, while swapping cards resumes hands-free scanning.
-    if (verdict === "moving" || verdict === "blurry") {
-      clearedCount += 1;
-      if (clearedCount >= CLEARED_SAMPLES_REQUIRED) {
-        armed.value = true;
-        clearedCount = 0;
-      }
+
+    stableCount = verdict === "ok" ? stableCount + 1 : 0;
+    settledCount = isSettled(sample) ? settledCount + 1 : 0;
+    if (
+      stableCount >= STABLE_SAMPLES_REQUIRED ||
+      settledCount >= PATIENCE_SAMPLES
+    ) {
+      disarm();
+      options.onStable();
+      return;
+    }
+
+    // Coach only on a problem that persists; a single wobble should not flash.
+    if (verdict === "ok") {
+      problem = "ok";
+      problemCount = 0;
+      hint.value = "";
     } else {
-      clearedCount = 0;
+      problemCount = verdict === problem ? problemCount + 1 : 1;
+      problem = verdict;
+      if (problemCount >= HINT_AFTER_SAMPLES) hint.value = hintFor(verdict);
     }
   }
 
@@ -145,8 +195,8 @@ export function useAutoCapture(options: AutoCaptureOptions): AutoCapture {
   function start(): void {
     stop();
     armed.value = true;
-    stableCount = 0;
     clearedCount = 0;
+    resetStreaks();
     timer = window.setInterval(tick, QUALITY_SAMPLE_INTERVAL_MS);
   }
 

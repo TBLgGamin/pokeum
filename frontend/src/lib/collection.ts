@@ -5,7 +5,7 @@ survives reloads and PWA restarts. Entries are small (~300 bytes of card
 metadata; images stay in the service-worker cache keyed by URL), so even large
 collections sit far below storage quotas. Storage failures (private mode,
 quota) are swallowed — scanning keeps working, persistence just pauses, the
-same trade-off as `preferences.ts`.
+and nothing crashes.
 
 Bump `COLLECTION_VERSION` when the persisted shape changes incompatibly; old
 data is then discarded rather than half-parsed.
@@ -36,7 +36,8 @@ export function loadCollection(): ScanEntry[] {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as { version?: number; entries?: unknown[] };
-    if (parsed.version !== COLLECTION_VERSION || !Array.isArray(parsed.entries)) return [];
+    if (parsed.version !== COLLECTION_VERSION || !Array.isArray(parsed.entries))
+      return [];
     return parsed.entries.filter(isValidEntry);
   } catch {
     return [];
@@ -46,18 +47,12 @@ export function loadCollection(): ScanEntry[] {
 /** Persist the collection; storage failures are ignored (scanning still works). */
 export function saveCollection(entries: ScanEntry[]): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: COLLECTION_VERSION, entries }));
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ version: COLLECTION_VERSION, entries }),
+    );
   } catch {
     // Quota or private mode: keep the in-memory collection, retry on next save.
-  }
-}
-
-/** Remove the persisted collection. */
-export function clearCollection(): void {
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    // Nothing to do: if storage is blocked there is nothing persisted either.
   }
 }
 

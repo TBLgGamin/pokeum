@@ -19,7 +19,10 @@ defineProps<{
     class="group relative size-[4.5rem] rounded-full p-0 hover:bg-transparent dark:hover:bg-transparent"
     :class="busy ? 'disabled:opacity-100' : 'disabled:opacity-40'"
   >
-    <span aria-hidden="true" class="absolute inset-0 rounded-full border-[3px] border-foreground" />
+    <span
+      aria-hidden="true"
+      class="absolute inset-0 rounded-full border-[3px] border-foreground"
+    />
     <span
       aria-hidden="true"
       class="size-[3.25rem] rounded-full bg-foreground transition-transform duration-100 group-active:scale-90 motion-reduce:transition-none"

@@ -20,7 +20,10 @@ function card(id: string): CandidateOut {
   };
 }
 
-function stored(): { version: number; entries: { card: CandidateOut; quantity: number }[] } {
+function stored(): {
+  version: number;
+  entries: { card: CandidateOut; quantity: number }[];
+} {
   return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null");
 }
 
@@ -47,7 +50,12 @@ it("adds a new card on top and counts repeats on the existing entry", () => {
   collection.add(card("2"));
   collection.add(card("1"));
 
-  expect(collection.entries.value.map((entry) => [entry.card.card_id, entry.quantity])).toEqual([
+  expect(
+    collection.entries.value.map((entry) => [
+      entry.card.card_id,
+      entry.quantity,
+    ]),
+  ).toEqual([
     ["2", 1],
     ["1", 2],
   ]);
@@ -62,10 +70,15 @@ it("adjusts quantities and removes a card when it reaches zero", () => {
   collection.add(card("2"));
 
   collection.adjust("1", -1);
-  expect(collection.entries.value.find((entry) => entry.card.card_id === "1")?.quantity).toBe(1);
+  expect(
+    collection.entries.value.find((entry) => entry.card.card_id === "1")
+      ?.quantity,
+  ).toBe(1);
 
   collection.adjust("1", -1);
-  expect(collection.entries.value.map((entry) => entry.card.card_id)).toEqual(["2"]);
+  expect(collection.entries.value.map((entry) => entry.card.card_id)).toEqual([
+    "2",
+  ]);
 
   collection.adjust("2", 2);
   expect(collection.totalCards.value).toBe(3);
@@ -83,7 +96,10 @@ it("writes once after a burst of edits, and a restored session starts from it", 
 
   expect(stored()).toBeNull();
   vi.advanceTimersByTime(400);
-  expect(stored()).toMatchObject({ version: COLLECTION_VERSION, entries: [{ quantity: 2 }] });
+  expect(stored()).toMatchObject({
+    version: COLLECTION_VERSION,
+    entries: [{ quantity: 2 }],
+  });
 
   const second = setup();
   expect(second.collection.totalCards.value).toBe(2);
@@ -99,18 +115,4 @@ it("flushes a pending write when the owning scope is disposed", async () => {
   dispose();
 
   expect(stored().entries).toHaveLength(1);
-});
-
-it("clears the list and the stored copy", async () => {
-  const { collection, dispose } = setup();
-  collection.add(card("1"));
-  await nextTick();
-  vi.advanceTimersByTime(400);
-
-  collection.clear();
-
-  expect(collection.entries.value).toEqual([]);
-  expect(collection.totalCards.value).toBe(0);
-  expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
-  dispose();
 });

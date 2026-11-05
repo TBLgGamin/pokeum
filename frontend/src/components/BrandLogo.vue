@@ -29,7 +29,10 @@ const files = {
     violet mark reversed. `contents` lets the <img> itself be the flex/grid item.
   -->
   <picture class="contents">
-    <source media="(prefers-color-scheme: dark)" :srcset="files[props.variant].dark" />
+    <source
+      media="(prefers-color-scheme: dark)"
+      :srcset="files[props.variant].dark"
+    />
     <img :src="files[props.variant].light" alt="Pokeum" :class="props.class" />
   </picture>
 </template>

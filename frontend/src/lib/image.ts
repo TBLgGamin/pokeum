@@ -39,10 +39,18 @@ export function guideCropSourceRect(
   videoHeight: number,
   margin = GUIDE_CROP_MARGIN,
 ): SourceRect | null {
-  if (videoWidth <= 0 || videoHeight <= 0 || videoRect.width <= 0 || videoRect.height <= 0) {
+  if (
+    videoWidth <= 0 ||
+    videoHeight <= 0 ||
+    videoRect.width <= 0 ||
+    videoRect.height <= 0
+  ) {
     return null;
   }
-  const coverScale = Math.max(videoRect.width / videoWidth, videoRect.height / videoHeight);
+  const coverScale = Math.max(
+    videoRect.width / videoWidth,
+    videoRect.height / videoHeight,
+  );
   const offsetX = (videoWidth * coverScale - videoRect.width) / 2;
   const offsetY = (videoHeight * coverScale - videoRect.height) / 2;
 
@@ -68,7 +76,10 @@ export function guideCropSourceRect(
  * Never makes things worse: when the image is already small enough, or
  * anything in decode/re-encode fails, the original blob is returned unchanged.
  */
-export async function downscaleForUpload(blob: Blob, maxSide = UPLOAD_MAX_SIDE): Promise<Blob> {
+export async function downscaleForUpload(
+  blob: Blob,
+  maxSide = UPLOAD_MAX_SIDE,
+): Promise<Blob> {
   try {
     const bitmap = await createImageBitmap(blob);
     const longest = Math.max(bitmap.width, bitmap.height);
