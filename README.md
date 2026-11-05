@@ -15,10 +15,10 @@ Fully self-hosted: a FastAPI recognition service plus an installable web app (PW
 ## Features
 
 - **📸 Live camera scanning** — point, tap, confirm. A guide frame crops the capture; the match sheet shows the card art for a one-tap save. Photo upload works too.
-- **🧠 Multi-signal recognition, no per-set training** — perceptual hashes + a fine-tuned DINOv2 image encoder (ONNX, CPU-only at runtime) + OCR of the collector number + set-symbol matching, fused into one confidence-ranked answer. A newly released set becomes recognizable with one data sync — never a retrain.
+- **🧠 Multi-signal recognition, no per-set training** — perceptual hashes + a fine-tuned DINOv2 image encoder (ONNX, CPU-only at runtime) + OCR of the collector number and the card name + set-symbol matching, fused into one confidence-ranked answer. Upside-down and sideways cards are handled, and an unsure camera scan quietly takes a few more frames before answering. A newly released set becomes recognizable with one data sync — never a retrain.
 - **✨ Variant detection** — reverse holo, 1st Edition, shadowless, promo stamps.
 - **📱 Installable app** — the website is a PWA: "Add to Home Screen" on Android and iOS gives an app icon, fullscreen launch, offline card art, and a collection that persists on the device.
-- **📤 Collection export** — TCGplayer-style CSV or plain text.
+- **📤 Collection export** — TCGplayer-style CSV.
 - **🔒 Your infrastructure** — one Python service serves both the API and the built frontend as a single origin. Card images come straight from the TCGdex CDN, so the server stays lean (~250 MB of data artifacts).
 
 ## Quickstart (self-host)
@@ -117,13 +117,13 @@ The service is a single process: run `python main.py serve` under your process m
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
-pre-commit install
+git config core.hooksPath .agents/git-hooks   # enable the commit guards (once per clone)
 cd frontend && npm ci && npm run dev   # Vite dev server proxying /api to :8000
 ```
 
-The quality gate (`ruff check`, `ruff format --check`, `mypy`, `bandit`, `pytest`) runs via pre-commit and CI; the test suite is fully offline. See [CONTRIBUTING.md](CONTRIBUTING.md).
+The quality gate (`ruff check`, `ruff format --check`, `mypy`, `bandit`, `pytest`) runs in CI and on demand; the commit hook enforces Ruff on the staged files plus the semver, docs-freshness and no-`.env` guards. The test suite is fully offline. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-This repo also ships a self-enforcing agent workflow (Claude Code and Codex): rules, skills, hooks that gate commits on doc freshness and semver, and agent-oriented docs in `openwiki/`. If you work with coding agents it's a working reference setup — see [`openwiki/workflow.md`](openwiki/workflow.md); if you don't, it stays out of your way.
+This repo also ships a self-enforcing agent workflow that works with any coding agent: rules and skills in a single `.agents/` folder, a git pre-commit hook that gates commits on doc freshness and semver, and agent-oriented docs in `openwiki/`. If you work with coding agents it's a working reference setup — see [`openwiki/workflow.md`](openwiki/workflow.md); if you don't, it stays out of your way.
 
 ## Credits & legal
 

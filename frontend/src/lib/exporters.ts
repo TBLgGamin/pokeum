@@ -43,16 +43,6 @@ export function toTcgplayerCsv(entries: ScanEntry[]): string {
   return lines.join("\n") + "\n";
 }
 
-/** Plain-text list ("1 Pikachu PAL 025/193") for pasting into chats/forums. */
-export function toPlainList(entries: ScanEntry[]): string {
-  return entries
-    .map((entry) => {
-      const code = entry.card.set.code ? ` ${entry.card.set.code}` : "";
-      return `${entry.quantity} ${entry.card.name}${code} ${entry.card.number}`;
-    })
-    .join("\n");
-}
-
 /** Trigger a client-side file download. */
 export function downloadFile(filename: string, content: string, mime = "text/csv"): void {
   const blob = new Blob([content], { type: mime });
