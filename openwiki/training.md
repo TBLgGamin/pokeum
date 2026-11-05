@@ -2,7 +2,7 @@
 title: Embedder fine-tune harness
 sources: ["training/**", "scripts/bakeoff.py", "scripts/acquire_photos.py", "scripts/annotate_photos.py", "docs/real-photo-data.md", "docs/photo-acquisition.md"]
 read-when: "changing the fine-tune training code (loss, augmentations, eval, export), re-running training, comparing encoder candidates, promoting a new encoder artifact, or acquiring and labelling real photos"
-verified: 388a26a04ef7
+verified: 8b83e516db86
 ---
 
 # Embedder fine-tune harness
