@@ -1,0 +1,58 @@
+pokeum — open work
+==================
+Rewritten 2026-11-05 after the v2 open items were run and the mtgfmax-inspired
+recognition changes landed. (The previous file was found truncated to 0 bytes
+mid-session; this replaces it.)
+
+Run everything from the repo root with the project Python environment.
+
+
+DONE 2026-11-05 — measured results (CPU, this dev box)
+------------------------------------------------------
+- Index rebuilt with the content-addressed embedder id
+  onnx:dinov2s-ft-v1.onnx:a9d4ddb5f5df (21,738 rows, ~22 min); second
+  `index build` is a no-op. Manifest consistent.
+- Scorecards (python main.py eval data/eval/<set>):
+                      v2 baseline        after mtgf changes
+    real (28)         27/28, 0 wrong     28/28, 0 wrong-confident
+    synthetic (20)    20/20, 0 wrong     20/20, 0 wrong-confident
+    scene (150)       101/150            127/150, 0 wrong-confident
+  data/eval/scene = scripts/make_synthetic_eval.py --scene --count 150 --seed 11
+  (cards on cluttered backgrounds, 25% turned 90/180/270 degrees).
+- Name OCR signal: +5 confident-correct on scene, top-1 unchanged.
+- 3-frame burst (80 synthetic scene cards): top-1 64 -> 67,
+  confident-correct 35 -> 40, confident-wrong 0 -> 0.
+- Load bench (sv02-014 photo, 20 requests): concurrency 1 = 4.56 rps,
+  p50 222 ms; concurrency 2 = 5.03 rps, p50 413 ms. 2 is (slightly) faster,
+  so IDENTIFY_MAX_CONCURRENCY stays 2. OCR (strip + title, one locked reader)
+  is now the critical path: ocr_wait ~100 ms after the dense signals.
+- 503 shedding: 14 parallel requests -> 3x 503, rest 200. Missing
+  EMBED_MODEL_PATH -> "embedding index unusable", health reports
+  histogram-v1 / embedder_loaded false, identify still answers.
+- Bake-off skipped by decision: dinov2s-ft-v1 stays the default.
+
+
+NEXT — ranked by leverage
+-------------------------
+1. Measurement upgrade (the mtgfmax lesson): per-case JSON from `eval`
+   (per-signal top-k, status, OCR/name reads, chosen view, timings), a
+   `--compare` of two runs, and a `--sweep` over WEIGHT_*, CONFIDENT_*,
+   UNCERTAIN_THRESHOLD, OCR_*/NAME_BOOST constrained to wrong_confident == 0.
+   Every threshold is still reasoned, not fitted.
+2. Grow the real labelled-photo set (docs/real-photo-data.md;
+   scripts/acquire_photos.py -> scripts/annotate_photos.py). 28 real photos
+   cannot move a threshold; ~300 can.
+3. OCR latency: strip and title OCR share one locked RapidOCR reader and run
+   back to back. Try one detector pass over a stacked strip+title image, or a
+   second reader instance, and re-run the load bench.
+4. INT8-quantize the encoder (onnxruntime.quantization, eval crops as the
+   calibration set); export under a new filename, compare with `eval`.
+5. Learn the fusion weights / thresholds from labelled outcomes (after 1-2).
+6. Hard-negative mining on same-artwork printings in training (or the
+   mtgfmax recipe: illustration-level classes + sub-center ArcFace) — decide
+   by measurement.
+7. Guard rails: run `eval data/eval/real` in CI with a top-1 floor and a
+   wrong_confident ceiling; /metrics endpoint (verdicts, p95, 503 count).
+8. Glare-aware hashing (per-cell glare mask, masked Hamming) and a learned
+   OBB card detector are the bigger mtgfmax ideas not yet ported; the scene
+   set's remaining 23 misses are mostly undetected cards on clutter.
