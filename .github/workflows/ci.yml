@@ -1,15 +1,27 @@
-# Mirrors the local quality gate (pre-commit / the /verify skill): identical
-# checks, identical pinned tool versions from requirements-dev.txt.
+# Mirrors the local quality gate (the pre-commit hook / the verify skill):
+# identical checks, identical pinned tool versions from requirements-dev.txt.
+# A green run on main triggers release.yml.
 name: CI
 
 on:
   push:
     branches: [main, dev]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Superseded runs on the same branch/PR are cancelled; main always finishes so
+# every commit there gets a verdict (the release workflow keys off it).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   python:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -38,6 +50,7 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: frontend
@@ -52,3 +65,16 @@ jobs:
         run: npm ci
       - name: Type-check and build
         run: npm run build
+      - name: Unit tests
+        run: npm test
+
+  wiki:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: OpenWiki lint (dead links, frontmatter, empty globs, secrets)
+        run: node .agents/skills/openwiki/scripts/openwiki-meta.mjs lint --check

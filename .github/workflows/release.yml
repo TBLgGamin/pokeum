@@ -1,0 +1,92 @@
+# Automatic releases. pyproject.toml's `version` is the single source of truth
+# (the commit guard already forces a bump whenever app code changes). After CI
+# passes on main, if no `v<version>` tag exists yet this workflow tags the
+# tested commit, writes notes from the Conventional Commits since the previous
+# tag, and publishes a GitHub Release marked latest. Pushes that don't bump the
+# version are a no-op.
+#
+# The fine-tuned encoder (dinov2s-ft-v1.onnx, ~85 MB) is not in git. The README
+# downloads it from releases/latest/download/, so every release re-attaches it
+# from MODEL_SOURCE_TAG. When a new model ships, upload it to that release's tag
+# and point MODEL_SOURCE_TAG at it.
+name: Release
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  MODEL_ASSET: dinov2s-ft-v1.onnx
+  MODEL_SOURCE_TAG: v1.5.2
+
+jobs:
+  release:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+          fetch-depth: 0
+
+      - name: Read version
+        id: version
+        run: |
+          version=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          tag="v${version}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "${tag} already released; nothing to do."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Write release notes
+        if: steps.version.outputs.exists == 'false'
+        run: |
+          prev=$(git describe --tags --abbrev=0 --match 'v*' "${SHA}" 2>/dev/null || true)
+          range="${prev:+${prev}..}${SHA}"
+          log() { git log --no-merges --format='- %s (%h)' "$range" | grep -E "$1" || true; }
+          {
+            section() { [ -n "$2" ] && printf '## %s\n\n%s\n\n' "$1" "$2"; return 0; }
+            section "Breaking changes" "$(git log --no-merges --format='- %s (%h)' "$range" | grep -E '^- [a-z]+(\([^)]*\))?!:' || true)"
+            section "Features" "$(log '^- feat(\(|:)')"
+            section "Fixes" "$(log '^- fix(\(|:)')"
+            section "Performance" "$(log '^- perf(\(|:)')"
+            section "Other changes" "$(git log --no-merges --format='- %s (%h)' "$range" \
+              | grep -vE '^- (feat|fix|perf)(\(|:|!)' \
+              | grep -vE '^- docs\(openwiki\): re-stamp' || true)"
+            [ -n "$prev" ] && echo "**Full changelog:** https://github.com/${GITHUB_REPOSITORY}/compare/${prev}...${{ steps.version.outputs.tag }}"
+          } > notes.md
+          cat notes.md
+
+      - name: Fetch encoder asset
+        if: steps.version.outputs.exists == 'false'
+        run: gh release download "$MODEL_SOURCE_TAG" --pattern "$MODEL_ASSET" --dir assets
+
+      - name: Publish release
+        if: steps.version.outputs.exists == 'false'
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" "assets/${MODEL_ASSET}" \
+            --target "${SHA}" \
+            --title "${{ steps.version.outputs.tag }}" \
+            --notes-file notes.md \
+            --latest
