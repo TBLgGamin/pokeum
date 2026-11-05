@@ -2,7 +2,7 @@
 title: Reference data & index
 sources: ["app/reference/**", "scripts/export_embedder.py"]
 read-when: "changing TCGdex sync, the SQLite catalogue schema, image caching, index build/load, or the ONNX embedder export"
-verified: 47d7d9a76124
+verified: 388a26a04ef7
 ---
 
 # Reference data & index
@@ -22,6 +22,7 @@ data/
   index/emb_full.npy  full-card embedding matrix   } row order in
   index/emb_art.npy   artwork-crop embedding matrix } row_ids.json
   index/row_ids.json
+  index/manifest.json encoder id, rows, dim — the "this index is complete" receipt
   models/*.onnx       exported encoder (EMBED_MODEL_PATH; default dinov2s-ft-v1.onnx)
 ```
 
@@ -31,11 +32,18 @@ consumer works at or below that size (224px embeddings, hashes, 320px thumbs,
 Trap to remember: on TCGdex the *extension* drives the encoding — `low.png` is
 still 600×825 lossless (~900 KB); only the webp variants are small.
 
-**Servers don't need `images/` or `thumbs/`**: each card row stores its TCGdex
-CDN `image_url` (surfaced through `CardRef` and the API), and the thumbnail
-endpoint redirects there when no local image exists. `images/` is a build-time
-input for `index build`; a deployment only needs `reference.db`, `index/`,
-`symbols/` (the symbol signal loads them at startup), and the ONNX model.
+**Servers don't need `thumbs/`, and need `images/` only for the discriminator**:
+each card row stores its TCGdex CDN `image_url` (surfaced through `CardRef` and
+the API), and the thumbnail endpoint redirects there when no local image
+exists. `images/` is a build-time input for `index build` — and, since the
+printing discriminator landed, a *query-time* one: an `AMBIGUOUS` scan rehashes
+the tied candidates' cached renders to tell two printings apart (see
+[recognition-pipeline](recognition-pipeline.md)). The degradation is graceful,
+not fatal — with no cached file the discriminator is skipped and the verdict
+stays `AMBIGUOUS` for the user to settle — but a deployment that drops
+`images/` gives up every automatic printing decision. The irreducible minimum
+is `reference.db`, `index/`, `symbols/` (the symbol signal loads them at
+startup), and the ONNX model.
 
 ## The store (`app/reference/store.py`)
 
@@ -61,7 +69,9 @@ Two details matter downstream:
   separator), killing the symbol signal while the rest of the pipeline looks
   healthy — exactly what happened in production before v1.7.1.
 - **Batched reads for the hot path** — `get_cards(ids)` resolves a shortlist in
-  chunked `IN` queries (one per 500 ids, not one per id), and
+  chunked `IN` queries (one per 500 ids, not one per id), `image_paths(ids)`
+  does the same for the printing discriminator's handful of tied candidates
+  (cards with no cached file are simply absent, like unknown ids), and
   `known_set_codes()` returns the printed set codes the pipeline uses to
   validate OCR output (see [recognition-pipeline](recognition-pipeline.md)).
 
@@ -96,12 +106,24 @@ drop-in); TCGdex is preferred.
 - **embeddings** — full-card and artwork-crop vectors for every card, appended to
   the `.npy` matrices with a shared `row_ids.json`.
 
-It is incremental: only cards missing hashes/embeddings are processed. Swapping
-the encoder (a different `Embedder.identifier`, tracked in `meta`) invalidates
-the matrices and forces a full rebuild, because embeddings from different
-encoders are not comparable. Matrix writes are atomic (temp file then
-`os.replace`). `load_embedding_indexes()` / `load_hash_index()` return the
-query-time indexes used by the pipeline.
+It is incremental: only cards missing hashes/embeddings are processed, and those
+embeddings are computed in batches of `INDEX_EMBED_BATCH` cards (one encoder run
+per batch instead of two per card). Matrix writes are atomic (temp file then
+`os.replace`), and `index/manifest.json` is written **last**, as the receipt
+that the artifacts are complete and belong to one encoder — keys
+`manifest_version`, `embedder_id`, `dim`, `rows`, `input_size`, `artwork_box`,
+`built_at`. A crash mid-write leaves a stale manifest, never a lying one.
+
+Swapping the encoder changes `Embedder.identifier` — now
+`onnx:<filename>:<sha256[:12]>`, so different weights under a reused filename
+still count as a swap — and forces a full rebuild, because embeddings from
+different encoders are not comparable. There is no `meta` key involved any more:
+`load_embedding_indexes(data_dir, embedder_id)` validates against the manifest
+and returns `(None, None)` — disabling the embedding signals with a warning
+`embedding index unusable (<reason>)` — when the manifest is missing, unreadable,
+of an unsupported `manifest_version`, or disagrees with the caller's
+`embedder_id`, the row count, or the matrix width. `load_hash_index()` returns
+the query-time hash index.
 
 **The new-set workflow is therefore just:** `sync` (or `sync --set X`) then
 `index build`. Minutes, no training.

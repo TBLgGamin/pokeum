@@ -1,6 +1,6 @@
 ---
 title: OpenWiki quickstart
-verified: 12d13ba10923
+verified: 388a26a04ef7
 ---
 
 # pokeum — Pokémon card recognizer
@@ -19,9 +19,20 @@ fused with **OCR of the collector number**:
 
 - a frozen image encoder and perceptual hashes match the card image against
   reference images pulled from [TCGdex](https://tcgdex.dev);
-- OCR of the bottom strip ("025/193" plus a set code like "PAL") disambiguates
-  reprints that share the same artwork; set-symbol matching covers WOTC-era
+- OCR of the bottom strip ("025/193" plus a set code like "PAL") is a retrieval
+  path in its own right, not merely a tiebreak: every catalogue card printed
+  with the number it read is scored directly, so the right reprint wins even
+  when no dense shortlist surfaced it. Set-symbol matching covers WOTC-era
   cards that print no set code.
+
+When OCR cannot read the strip (glare, a tight crop, low light), two printings
+of the same artwork can be genuinely inseparable — the dense signals see one
+picture. A second stage then re-scores the tie on the regions that *can* differ
+between printings (bottom strip, set-symbol zone) against each candidate's
+cached reference render, and settles it outright when one wins clearly. Only
+when that is inconclusive too is the answer `ambiguous`: the result carries the
+artwork's printings and the client asks the user to pick, instead of guessing
+and quietly being wrong (see [recognition-pipeline](recognition-pipeline.md)).
 
 **The invariant: a new set is a data operation, never training.** You `sync` its
 cards and images, `index build` recomputes hashes/embeddings, and the card is
@@ -41,14 +52,25 @@ app/
   vision/          geometry (pure) · detect · rectify · regions · imaging (OpenCV)
   signals/         base (Protocols) · hashes · embedding · ocr · symbol
   variants/        reverse_holo · wotc (1st Ed, shadowless) · stamps · assess
-  recognize/       pipeline · fusion (pure) · temporal (pure) · webcam · factory · eval
-  cli.py           sync · index · identify · scan · serve · eval
+  recognize/       pipeline · fusion (pure) · rerank (printing discriminator) ·
+                   temporal (pure) · webcam · factory ·
+                   eval (accuracy scorecard) · bench (latency/throughput)
+  cli.py           sync · index · identify · scan · serve · eval · bench
   api/             FastAPI app: schemas · routes · server
 main.py            entry point → app.cli
-scripts/
-  export_embedder.py   dev-only: export an encoder to ONNX (needs torch)
+frontend/          Vue PWA scan UI (see scan-frontend.md); everything in
+                   public/ — favicons, PWA icons, link previews — is generated
+                   from the docs/brand/ SVGs by one npm script
+scripts/           dev-only tools, run from the repo root (never shipped)
+  export_embedder.py      export an encoder to ONNX (needs torch)
+  acquire_photos.py       stage candidate real photos with provenance
+  annotate_photos.py      label staged photos by printed collector number
+  bakeoff.py              score encoder candidates against each other
+  make_synthetic_eval.py  build the synthetic eval set
 training/          one-time GPU fine-tune harness (standalone; see training.md)
 tests/             offline pytest suite (no network, no model downloads)
+docs/              real-photo-data.md (why labelled real photos are needed) ·
+                   brand/ (SVG logo sources, generated PNG kit, regeneration)
 ```
 
 Import direction is one-way: `core ← models ← (reference, vision, signals,
@@ -58,25 +80,35 @@ variants) ← recognize ← (cli, api)`. `app/core/` never imports from the rest
 ## The documentation
 
 - **[recognition-pipeline](recognition-pipeline.md)** — how an image becomes a
-  ranked answer: detection and rectification, the four signals, how fusion
-  combines them into a confidence, variant checks, and webcam aggregation.
+  ranked answer: detection and rectification, orientation hypotheses, the
+  signals (hash, embedding, OCR, title name, symbol), union exact re-scoring,
+  how fusion combines them into a confidence, the printing
+  discriminator that settles same-artwork ties, variant checks, multi-frame
+  bursts, and webcam
+  aggregation.
 - **[reference-data](reference-data.md)** — the catalogue and index: syncing
   from TCGdex into SQLite plus an image cache, building hash/embedding
   artifacts, and why a new set never needs training.
 - **[service-and-cli](service-and-cli.md)** — the command line, the FastAPI
-  endpoints, live webcam scanning, and the accuracy eval harness.
+  endpoints (including the `/identify` concurrency cap), live webcam scanning,
+  and the accuracy eval + load bench harnesses.
+- **[scan-frontend](scan-frontend.md)** — the Vue PWA: camera scan view with
+  auto-capture, the printing chooser for `ambiguous` results, the on-device
+  collection and CSV export.
 - **[training](training.md)** — the one-time GPU fine-tune of the encoder
-  (photography invariance) and its export/parity contract with the app.
+  (photography invariance), its export/parity contract with the app, and where
+  real labelled photos come from.
 - **[workflow](workflow.md)** — the settings-vs-constants split, coding
-  conventions, the quality gate, and the Claude Code automation in `.claude/`.
+  conventions, the quality gate, and the agent setup in `.agents/` (rules,
+  skills, the git pre-commit hook).
 - **[troubleshooting](troubleshooting.md)** — known failure signatures and their
-  fixes (machine-read by a hook).
+  fixes (a greppable runbook).
 
 ## Run it
 
 ```
 # 1. install runtime deps (numpy, opencv, imagehash, onnxruntime, rapidocr,
-#    httpx, fastapi, uvicorn, boto3 — all pinned)
+#    httpx, fastapi, uvicorn — all pinned)
 python -m pip install -r requirements.txt
 
 # 2. populate the local catalogue + image cache from TCGdex
@@ -91,14 +123,20 @@ python main.py identify path/to/card.jpg --json     # machine-readable
 
 # live webcam, or serve the HTTP API (+ the built frontend, if present)
 python main.py scan
-python main.py serve       # /api: POST /identify, POST /scans, GET /health, GET /cards/{id}
+python main.py serve       # /api: POST /identify, GET /health, GET /cards/{id}
 
 # browser scan UI (Vue): start the API first, then
 cd frontend && npm install && npm run dev    # http://localhost:5173
+
+# measure before and after a change: accuracy over labelled images, then
+# latency/throughput on this machine
+python main.py eval data/eval/real --out eval-real.json
+python main.py bench data/eval/real/some-card.jpg --requests 20 --concurrency 2
 ```
 
 Reference data lives under `DATA_DIR` (default `./data`, gitignored):
-`reference.db` (SQLite), `images/`, `index/*.npy`, `symbols/`, `models/`.
+`reference.db` (SQLite), `images/`, `index/*.npy` + `index/manifest.json`,
+`symbols/`, `models/`.
 Configuration is read only through [`app/core/config.py`](../app/core/config.py)
 accessors; see [`.env.example`](../.env.example) for every key and default.
 `python main.py ...` loads a local `.env` automatically (shell variables win).

@@ -1,20 +1,20 @@
 ---
 title: Embedder fine-tune harness
-sources: ["training/**"]
-read-when: "changing the fine-tune training code (loss, augmentations, eval, export), re-running training, or promoting a new encoder artifact"
-verified: b9a6e044d582
+sources: ["training/**", "scripts/bakeoff.py", "scripts/acquire_photos.py", "scripts/annotate_photos.py", "docs/real-photo-data.md", "docs/photo-acquisition.md"]
+read-when: "changing the fine-tune training code (loss, augmentations, eval, export), re-running training, comparing encoder candidates, promoting a new encoder artifact, or acquiring and labelling real photos"
+verified: 388a26a04ef7
 ---
 
 # Embedder fine-tune harness
 
-`training/` is the **one-time** metric-learning fine-tune of the DINOv2-S
-encoder that recognition retrieves with. It teaches the encoder *photography
-invariance* — glare, imperfect rectification, blur, sleeve reflections — never
-card identities, so the project's core invariant survives: **a new set is still
-just `sync` + `index build`, zero training** (see
-[reference-data](reference-data.md)). The harness is standalone: it never
-imports `app/`, `app/` never imports it, and it runs on a GPU box, not the dev
-machine.
+`training/` is the **one-time** metric-learning fine-tune of the ViT encoder
+that recognition retrieves with (DINOv2-S by default, DINOv3 selectable). It
+teaches the encoder *photography invariance* — glare, imperfect rectification,
+blur, sleeve reflections — never card identities, so the project's core
+invariant survives: **a new set is still just `sync` + `index build`, zero
+training** (see [reference-data](reference-data.md)). The harness is standalone:
+it never imports `app/`, `app/` never imports it, and it runs on a GPU box, not
+the dev machine.
 
 ## How it trains
 
@@ -61,6 +61,54 @@ flat evals, embedding-collapse monitor, clean-gallery drift report,
 non-finite-loss abort, one-shot batch halving on CUDA OOM. Checkpoints resume
 losslessly (`--resume`).
 
+## Where real photos come from
+
+Both views of a pair are official renders with the photography *simulated*, and
+simulation is the one thing that cannot supply the real distribution of glare,
+sleeves, phone optics and hand tilt. No public dataset substitutes: the surveyed
+ones label bounding boxes, real-vs-fake, or clean catalogue renders — never the
+**exact printing**, which is the only granularity a metric-learning objective
+over `base1-4` vs `base2-4` can use. The survey, the licence position
+and the volume targets are in
+[`docs/real-photo-data.md`](../docs/real-photo-data.md).
+
+Two dev-only tools bring in
+photographs from outside the app, with provenance and an *independent* label:
+[`scripts/acquire_photos.py`](../scripts/acquire_photos.py) stages bytes exactly
+as fetched into `data/photos/staging/<source>/` plus an append-only
+`data/photos/ledger.jsonl` (sources `local`, `roboflow`, `tcgar`, `reddit`;
+`image_id` = truncated SHA-256 of the source URL, so reruns are idempotent) and
+never assigns a label. [`scripts/annotate_photos.py`](../scripts/annotate_photos.py)
+then decides the printing from the card's own collector number plus the local
+catalogue — it never builds a recognizer or opens the embedding index, so its
+labels are not the model's own pseudo-labels — and writes
+`{card_id}__{image_id}` files under `data/photos/labelled/` (`eval`-readable),
+`review.jsonl` for adjudication and `annotations.jsonl` with evidence. Source
+licences, the do-not list (no eBay/TCGplayer/Cardmarket/grading-site scraping)
+and the provenance record fields are in
+[`docs/photo-acquisition.md`](../docs/photo-acquisition.md).
+
+## Backbone selection
+
+The encoder is a config value, not a hardcoded import:
+[`backbones.py`](../training/backbones.py) registers `dinov2_vits14` (default,
+Apache-2.0, torch.hub fetches it), `dinov3_vits16` and `dinov3_vits16plus`. All
+three emit 384-d CLS features, so the projection head, the parity gate, and the
+app's embedding matrices are unaffected by the choice. `--backbone` /
+`--backbone-weights` select it, and the choice travels in the checkpoint's
+config, so `evaluate.py` and `export_onnx.py` rebuild the matching model without
+being told again.
+
+DINOv3 weights are **gated** (Meta download form, custom DINOv3 licence — not
+Apache-2.0, which matters for redistributing an exported artifact):
+`load_backbone` refuses a DINOv3 entry without a local `.pth` instead of trying
+to fetch one. Nothing is promoted on opinion —
+[`scripts/bakeoff.py`](../scripts/bakeoff.py) re-indexes the catalogue with each
+candidate `.onnx`, scores it on the labelled eval set, benches its latency, and
+restores the working index to the first (baseline) model afterwards. The app's
+default stays `dinov2s-ft-v1.onnx` until a bake-off beats it on `top1_accuracy`
+without raising `wrong_confident`.
+
 ## Export contract (the part that must never drift)
 
 [`export_onnx.py`](../training/export_onnx.py) exports the backbone to the
@@ -70,9 +118,11 @@ exact graph the app's `OnnxEmbedder` expects: input `"image"` (dynamic batch,
 1. **Single-input wrapper required**: DINOv2's `forward(x, masks=None)` makes
    modern torch exporters emit `masks` as a required graph input. Both this
    module and `scripts/export_embedder.py` wrap the model to pin the signature.
-2. **New filename per export** (`dinov2s-ft-v1.onnx`, `-v2`, …):
-   `OnnxEmbedder.identifier` is filename-based, and the identifier change is
-   what triggers the app's automatic re-embed on `index build`.
+2. **Content-addressed identifier**: `OnnxEmbedder.identifier` is
+   `onnx:<filename>:<sha256[:12]>`, so any weight change is what triggers the
+   app's automatic re-embed on `index build` — even under a reused filename.
+   Still export under a new filename (`dinov2s-ft-v1.onnx`, `-v2`, …) so humans
+   can tell two artifacts apart.
 
 A mandatory **parity gate** embeds real card images through torch (using the
 app's exact preprocessing — PIL squash-resize, ImageNet norm, re-implemented

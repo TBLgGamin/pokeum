@@ -1,11 +1,11 @@
 ---
-title: Service, CLI, frontend & webcam
-sources: ["app/cli.py", "app/api/**", "app/collect/**", "main.py", "app/recognize/factory.py", "app/recognize/webcam.py", "app/recognize/eval.py", "frontend/**", "scripts/make_synthetic_eval.py"]
-read-when: "changing the CLI commands, the FastAPI endpoints, the Vue scan frontend, webcam scanning, the recognizer factory/wiring, or the eval harness"
-verified: 0044ae99928c
+title: Service, CLI & webcam
+sources: ["app/cli.py", "app/api/**", "main.py", "app/recognize/factory.py", "app/recognize/webcam.py", "app/recognize/eval.py", "app/recognize/bench.py", "scripts/make_synthetic_eval.py"]
+read-when: "changing the CLI commands, the FastAPI endpoints, webcam scanning, the recognizer factory/wiring, or the eval/bench harnesses"
+verified: 388a26a04ef7
 ---
 
-# Service, CLI, frontend & webcam
+# Service, CLI & webcam
 
 The three ways to drive the recognizer, plus the wiring that builds it. The
 recognition logic itself is in [recognition-pipeline](recognition-pipeline.md);
@@ -21,6 +21,19 @@ fakes and never touch this module**. Missing embedding indexes simply disable th
 embedding signals rather than failing, and OCR degrades to `None` if
 unavailable — the service still starts.
 
+**Startup warm-up.** `build_recognizer(..., warm=True)` — the default, and what
+every caller uses today — finishes by running one throwaway `identify` on a
+mid-grey noise frame (`_warm_up`). ONNX Runtime allocates its arenas and
+RapidOCR loads its sub-models on *first inference*, not at construction, so
+without this the first real scan pays several hundred milliseconds of
+initialisation that has nothing to do with it. The frame is noise on purpose:
+no card quad is found, so the whole-frame path runs every signal, and it runs
+on the recognizer's own executor threads — the same ones the first request will
+use. The cost is paid once, visibly (`recognizer warmed in N ms`), and it can
+never block startup: a warm-up failure is logged and the recognizer is returned
+cold. `warm=False` exists for construction paths where first-call latency does
+not matter and the extra recognition would be pure overhead.
+
 ## CLI (`app/cli.py`, entered via `main.py`)
 
 `main.py` is a thin dispatch into `app.cli.main()`. Heavy modules are imported
@@ -34,7 +47,8 @@ are written to stdout; progress and diagnostics go through logging to stderr.
 | `identify IMAGE [--top-k N] [--json] [--no-ocr]` | Recognize one image file |
 | `scan [--camera N]` | Live webcam recognition |
 | `serve [--host H] [--port P]` | Start the FastAPI service |
-| `eval FOLDER [--top-k N]` | Score recognition over labelled images |
+| `eval FOLDER [--top-k N] [--out PATH]` | Score recognition over labelled images |
+| `bench IMAGE [--requests N] [--concurrency C]` | Measure recognition latency and throughput |
 
 `--data-dir` overrides the data root for any command. `identify` prints a
 human-readable summary by default (card, set, number, confidence, variants,
@@ -47,27 +61,53 @@ recognizer is expensive to construct, so it is built once during the app's
 lifespan and stashed on `app.state` for every request to share. Tests inject a
 ready-made recognizer to skip that cost.
 
+The OpenAPI document carries `_API_VERSION` (`2.0.0`), kept in step with the
+package version: v2 is a breaking surface change — the `ambiguous` status and
+`503` load shedding on `/identify`.
+
 Routes ([`routes.py`](../app/api/routes.py)) are thin — decode, call the shared
 recognizer, return its own dict for FastAPI to validate against the response
 models in [`schemas.py`](../app/api/schemas.py). **All API routes are mounted
 under `/api`** so the built frontend can be served from the same origin at the
 root (the client's default `/api` base then works identically in dev and prod):
 
-- `GET /api/health` → `{status, cards_indexed, embedder_loaded}`
+- `GET /api/health` → `{status, cards_indexed, embedder_loaded, embedder_id}`.
+  `embedder_loaded` reports whether the embedding *indexes* are loaded and
+  usable; `embedder_id` is the encoder's own identity
+  (`Recognizer.embedder_id` — `onnx:<filename>:<sha256[:12]>` for an ONNX
+  model, `histogram-v1` for the NumPy fallback, `"none"` only for an
+  embedder-less recognizer). The id is content-addressed on purpose: one health
+  call says which weights are answering, and comparing it against the index
+  manifest's `embedder_id` says whether the index was built from them (see
+  [reference-data](reference-data.md)).
 - `POST /api/identify` (multipart `file`, query `top_k`, `require_detection`,
   `guide_margin`) → the recognition result; `400` when the upload cannot be
   decoded as an image. Decode + recognition run via `run_in_threadpool` (they
   are CPU-bound; inline they would stall every concurrent request), and the
-  upload is capped to `INGEST_MAX_SIDE` first. `require_detection=true` answers
-  `no_card_detected` when no card quad is found. A guided camera capture instead
-  sends its symmetric margin as `guide_margin`: detection remains preferred,
-  but the recognizer can recover the known inner guide and only accepts that
-  fallback when fusion is confident. Pre-cropped photo uploads keep the
-  whole-frame fallback.
-- `POST /api/scans` (multipart `file` + `annotation` JSON form field) → `202`
-  immediately; the upload to S3 happens as a background task after the
-  response. Annotations without `consent: true` are dropped server-side with an
-  identical response. `422` on a malformed annotation.
+  upload is capped to `INGEST_MAX_SIDE` first. **Recognition is bounded**: an
+  `asyncio.Semaphore(IDENTIFY_MAX_CONCURRENCY)` (default 2, created in the
+  lifespan) admits requests, and one that waits longer than
+  `IDENTIFY_QUEUE_TIMEOUT_SECONDS` (2.0 s) is shed with `503`
+  `recognizer busy` plus `Retry-After: 1` rather than queued. The reasoning:
+  recognition is CPU-bound on a fixed core count, so past a small cap extra
+  concurrency buys no throughput and only inflates every request's latency —
+  a scan UI would rather retry in a second than watch one crawl. The slot is
+  released in a `finally`, so a decode failure never leaks it.
+  `require_detection=true` answers `no_card_detected` when no card quad is
+  found. A guided camera capture instead sends its symmetric margin as
+  `guide_margin`: detection remains preferred, but the recognizer can recover
+  the known inner guide and only accepts that fallback when fusion is
+  confident. Pre-cropped photo uploads keep the whole-frame fallback.
+- `POST /api/identify/burst` (multipart `files[]`, same query parameters) →
+  one recognition result from 1–`BURST_MAX_FRAMES` (4) frames of the same card;
+  `400` for a bad frame count or an undecodable frame. The scan UI sends it
+  when a single frame was not decisive. The whole burst holds **one**
+  semaphore slot (and sheds `503` the same way), so a burst costs the capacity
+  of one request, not N; frames are decoded and capped like `/identify`. The
+  merge rules are in
+  [recognition-pipeline](recognition-pipeline.md#multi-frame-bursts).
+  The response (like `/identify`) carries `name`, the title-band read that
+  fed fusion, next to `ocr`.
 - `GET /api/cards/{card_id}` → catalogue detail (includes the card's TCGdex CDN
   `image_url`, which every candidate in `/api/identify` responses also
   carries); `404` when unknown
@@ -91,88 +131,12 @@ CORS is wide open on purpose: the service is account-less, and the frontend may
 load from another origin (dev server, tunnel). Start it with
 `python main.py serve` (binds `API_HOST:API_PORT`, defaults `127.0.0.1:8000`).
 
-## Scan collection (`app/collect/`)
-
-`ScanCollector` ([`s3.py`](../app/collect/s3.py)) uploads each accepted scan —
-the captured photo plus a sibling annotation JSON — to S3 under
-`{prefix}/YYYY/MM/DD/{uuid}.{webp,json}`, for future encoder fine-tunes. It is
-strictly best-effort: it runs as a FastAPI background task after the response,
-never raises (failures are logged and swallowed, no retries), and **no-ops
-entirely while `SCANS_S3_BUCKET` is empty** — the default, so the app runs
-identically without any AWS setup. Two server-side guarantees on what lands in
-the bucket: every image is **normalized before upload** (long side capped to
-`SCAN_STORE_MAX_SIDE` = 512 px — enough that the card region still exceeds the
-352 px training cache height with the guide margin included — re-encoded as
-lossy webp, so stored scans are training-ready pairs of image + `card_id`
-label), and **uploads pause while total bucket usage is at or above
-`SCANS_MAX_BUCKET_BYTES` (100 GB)** — usage is summed from an object listing
-cached for an hour and grown by our own uploads in between. Configuration:
-`SCANS_S3_BUCKET`, `SCANS_S3_REGION` (use `auto` for Cloudflare R2),
-`SCANS_S3_PREFIX`, `SCANS_S3_ENDPOINT_URL` (S3-compatible stores), with
-credentials via boto3's standard chain (see `.env.example`).
-boto3 is imported lazily on the first enabled upload. The lifespan wires one
-collector onto `app.state.collector`; tests inject a fake. The annotation
-carries `SCAN_ANNOTATION_SCHEMA_VERSION` so training tooling can evolve the
-shape.
-
 ## Scan frontend (`frontend/`)
 
-A Vue 3 + TypeScript + Tailwind app with hand-written shadcn-style components
-(`src/components/ui/` — they take a `class` prop merged via tailwind-merge so
-callers can override styles; bypassing that caused a real white-buttons bug).
-Two views in [`App.vue`](../frontend/src/App.vue): a full-screen camera scan
-view (guide frame, one scan button, then a confirmation sheet showing the
-matched card's thumbnail with Skip/Save) and an export view (a thumbnail grid
-of the collection with a TCGplayer-style CSV download —
-[`exporters.ts`](../frontend/src/lib/exporters.ts)).
-No confidence values are shown anywhere by design. Card art renders via
-`cardArtUrl` ([`api.ts`](../frontend/src/lib/api.ts)): the candidate's TCGdex
-CDN `image_url` when known, else the API image endpoint.
-
-**Installable PWA:** `vite-plugin-pwa` (config in
-[`vite.config.ts`](../frontend/vite.config.ts)) generates the manifest and a
-Workbox service worker; `main.ts` registers it (`autoUpdate` — new deploys
-activate on next launch). The app shell is precached; card art is runtime
-`CacheFirst` (the TCGdex CDN plus the API thumbnail fallback, capped at
-1500/500 entries), `/api/*` is never answered by the navigation fallback, and
-POSTs are never cached. Icons in `frontend/public/` are generated from
-`logo.svg` via `npm run generate-pwa-assets`. Installing requires HTTPS (as
-does the camera).
-
-**The collection persists on-device**: `entries` round-trips through
-versioned-JSON localStorage ([`collection.ts`](../frontend/src/lib/collection.ts)
-— same swallow-storage-errors pattern as `notice.ts`), loaded on mount, saved
-by a 400 ms-debounced deep watch and flushed on `visibilitychange: hidden`
-(mobile PWAs die without unload events). The first non-empty save requests
-`navigator.storage.persist()` against eviction. The export view has a
-confirm-guarded clear-all button. Because persisted cards carry `image_url`,
-a restored collection renders art from the service-worker cache even offline.
-
-Camera captures are **cropped to the guide frame** before upload: `captureFrame`
-maps the ScannerFrame's on-screen rect through the video's `object-cover`
-geometry to source pixels (`guideCropSourceRect` in
-[`image.ts`](../frontend/src/lib/image.ts), pure and unit-testable), keeping a
-`GUIDE_CROP_MARGIN` of background around the card so quad detection can close
-the contour. The camera sends that margin as `guide_margin`: the server uses a
-detected quad when available, otherwise strips the known symmetric margin and
-recognizes the inner guide. The fallback must clear the confident threshold;
-an uncertain result asks for a steadier angle. Photo uploads keep the server-side
-whole-frame fallback, while non-guided strict callers may still request
-`require_detection=true`.
-
-Data collection: a first-visit notice ([`DataNotice.vue`](../frontend/src/components/DataNotice.vue),
-acknowledged flag in localStorage via [`notice.ts`](../frontend/src/lib/notice.ts))
-tells the user that saved scans are collected. On **Save**, the captured blob
-(retained alongside `pending`) and its annotation are POSTed fire-and-forget to
-`/scans` ([`api.ts`](../frontend/src/lib/api.ts) `submitScan`) — failures never
-surface. File-library uploads are downscaled client-side first
-([`image.ts`](../frontend/src/lib/image.ts), max side 1600px); camera captures
-are already 1080p-bounded.
-
-Dev: `npm run dev` in `frontend/` (port 5173) proxies `/api/*` to the local
-service, so start the API first; `allowedHosts` covers cloudflared/ngrok
-tunnels, and `VITE_API_BASE` points the client at a cross-origin API when the
-proxy isn't in play. Build check: `npm run build` (vue-tsc + vite).
+The Vue PWA that drives the API from a phone camera — auto-capture, the
+printing chooser, the on-device collection and CSV export — has its own page:
+[scan-frontend](scan-frontend.md). It is the only client that uses
+`guide_margin`.
 
 ## Webcam (`app/recognize/webcam.py`)
 
@@ -187,22 +151,57 @@ preview window, which is why emissions go to stdout rather than an overlay.
 ## Eval harness (`app/recognize/eval.py`)
 
 `evaluate_folder()` recognizes every `{card_id}__*.jpg` labelled image in a
-folder and reports the full scorecard: top-1 / top-k accuracy, verdict counts
-(confident / uncertain / no_match), mean confidence, mean margin over the
-runner-up, and the list of misses. It is the acceptance instrument for the
-recognition milestones: it makes a change's effect on real photos measurable
-rather than guessed. Run it with `python main.py eval <folder>`.
+folder and reports the full scorecard: top-1 / top-k accuracy, `artwork_top1`
+and `artwork_top1_accuracy` (the top pick's card *name* equals the truth
+card's — name equality is the same-artwork proxy used throughout v2, so
+"right artwork, wrong printing" is scored apart from "wrong card"), verdict
+counts per status (`confident` / `uncertain` / `ambiguous` / `no_match` /
+`no_card_detected`), `wrong_confident` (a `CONFIDENT` verdict whose top pick
+is not the truth — the one number that must never grow, because a confident
+mistake is the only failure the UI cannot walk back), `abstained` (`no_match`
+or `no_card_detected`), mean confidence, mean margin over the runner-up, a
+`latency_ms` summary (`p50` / `p95` / `mean` / `max` over the per-image
+timings, nearest-rank percentiles so no NumPy is needed) and the list of
+misses. It is the acceptance instrument for the recognition milestones: it
+makes a change's effect on real photos measurable rather than guessed. Run it
+with `python main.py eval <folder>`; `--out PATH` writes the same JSON report
+to a file as well, so two runs can be diffed instead of eyeballed.
 
-Labelled test sets live under `data/eval/` (gitignored): `synthetic/` is
-regenerable via `scripts/make_synthetic_eval.py` (PIL-based distortions,
-deliberately independent of the training augmentations), and `real/` holds
-real-world listing photos named `{card_id}__*.jpg`.
+Labelled test sets live under `data/eval/` (gitignored), all scored the same
+way: `synthetic/` and `scene/` come from
+`scripts/make_synthetic_eval.py` (PIL-based distortions, deliberately
+independent of the training augmentations). `--scene` additionally places each
+damaged card on a cluttered background at a random scale and tilt, with 25%
+turned 90/180/270° (`data/eval/scene`, files `{card_id}__scene.jpg`), so it
+exercises detection and orientation handling rather than only the signals.
+`real/` holds real-world listing photos named `{card_id}__*.jpg`. Labelled
+photos produced by the acquire/annotate pipeline (see
+[`docs/real-photo-data.md`](../docs/real-photo-data.md) and
+[training](training.md)) use the same naming and can be scored the same way.
+
+## Load bench (`app/recognize/bench.py`)
+
+`run_bench()` answers what the accuracy scorecard cannot: how long one
+recognition takes on this machine, and what happens to throughput when several
+run at once. It builds one recognizer via the same factory the API uses (which
+warms it), loads the image once, runs its own untimed `identify` on the actual
+bench image before measuring — the factory's noise frame warms the models, this
+one also warms the caches this image will touch — then drives `requests` timed
+recognitions through a
+`ThreadPoolExecutor(max_workers=concurrency)` and reports `wall_s`,
+`throughput_rps` and `latency_ms` (`p50`/`p95`/`max`, via the same
+`latency_summary()` the eval report uses). Run it with
+`python main.py bench IMAGE [--requests N] [--concurrency C]`. This is the
+measurement that justifies the ONNX thread counts and
+`IDENTIFY_MAX_CONCURRENCY`: if concurrency 2 does not beat concurrency 1 on
+`throughput_rps`, the cap belongs at 1.
 
 ## Changing this area
 
 - Keep routes thin: no recognition logic in `routes.py` — extend the pipeline
   instead. The API test (`tests/test_api.py`) uses `TestClient` with a fake,
-  index-free recognizer and asserts the happy path, a bad upload, and lookups.
+  index-free recognizer and asserts the happy path, a bad upload, lookups, and
+  load shedding past the concurrency cap (`Retry-After` included).
 - New config values follow the settings checklist in [workflow](workflow.md):
   an accessor in `app/core/config.py` and a key in `.env.example`.
 - CLI output goes to stdout via `sys.stdout.write` (results are the product);
