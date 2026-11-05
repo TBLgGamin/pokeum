@@ -221,7 +221,7 @@ _DRIVE_SHARE_ID_RE = re.compile(r"/d/([A-Za-z0-9_-]+)")
 DRIVE_DOWNLOAD_URL = "https://drive.usercontent.google.com/download"
 
 REDDIT_CLIENT_ID_VAR = "REDDIT_CLIENT_ID"
-REDDIT_CLIENT_SECRET_VAR = "REDDIT_CLIENT_SECRET"
+REDDIT_CLIENT_SECRET_VAR = "REDDIT_CLIENT_SECRET"  # pragma: allowlist secret (env var name)
 # The two subreddits where cards are photographed and named in the title.
 REDDIT_SUBREDDITS = "PokemonTCG+pokemoncards"
 # Reddit user content: the User Agreement's licence grant is sublicensable and
