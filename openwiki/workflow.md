@@ -2,7 +2,7 @@
 title: Development workflow
 sources: ["app/core/config.py", "app/core/logging_config.py", "tests/**", ".env.example", ".agents/**", "AGENTS.md", "CLAUDE.md", ".gitattributes", ".github/**", ".pre-commit-config.yaml", "pyproject.toml", "requirements.txt", "requirements-dev.txt", "scripts/fresh-start.sh", "scripts/fresh-start.ps1", "scripts/claude-headroom.sh", "scripts/claude-headroom.ps1"]
 read-when: "changing settings/logging, tests, dependencies, quality-gate config, CI, the git pre-commit hook, agent rules/skills (.agents/), coding conventions, or the fresh-start/detach script"
-verified: 388a26a04ef7
+verified: 860655def404
 ---
 
 # Development workflow
@@ -130,7 +130,7 @@ discipline as the Python suite. See [scan-frontend](scan-frontend.md).
 (from the `repo-template` template): the bug and feature issue forms (blank
 issues off; GitHub adds the security link because `SECURITY.md` exists), the PR
 template, `CODEOWNERS`, and `dependabot.yml`, which bumps GitHub Actions weekly.
-Python and npm pins are bumped by hand (see *Conventions*); Dependabot security
+Python and npm pins are bumped by hand, with `pip-audit`; Dependabot security
 updates still cover them. Repository settings are not files, so
 [`.github/repo-settings.sh`](../.github/repo-settings.sh) applies them with `gh`:
 squash merge only with the PR title as the commit message, branches deleted
