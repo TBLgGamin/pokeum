@@ -40,7 +40,7 @@ Work through the `openwiki/` tree:
 3. **Structure.** Merge thin/stub pages into broader pages or quickstart, collapse single-file directories without a growth story, prefer headings over micro-pages, split oversized pages along real boundaries (updating `sources` on both halves).
 4. **Duplication.** Each concept has one canonical home; reduce repeats elsewhere to a mention + link.
 5. **Bloat.** Trim content with no explanatory value: raw file inventories duplicating the tree, stale commit-hash lists, boilerplate that says nothing repo-specific.
-6. **Agent files.** Top-level `AGENTS.md`/`AGENTS.md` contain the exact OpenWiki section from `structure.md`; refresh only if missing or semantically stale.
+6. **Agent files.** Top-level `AGENTS.md` contains the exact OpenWiki section from `structure.md`; refresh only if missing or semantically stale.
 
 Rules of engagement: verification reads are targeted — this is an edit pass, not a research pass. Preserve accurate wording; no formatting-only churn on pages you aren't otherwise correcting. When merging or deleting pages, update every link that pointed at them (including quickstart) and fold the removed page's `sources` into the surviving page.
 

@@ -10,13 +10,16 @@ Scope from `$ARGUMENTS`: `commit` stops after committing, `push` after pushing, 
 
 ## 0. Preflight
 
-- Run the `/verify` gate first and fix findings — pre-commit runs the same checks and will reject a dirty commit. Never use `--no-verify` (the commit guard blocks it anyway).
+- Run the `/verify` gate first and fix findings — the pre-commit hook rejects Python that fails Ruff and CI runs the full gate. Never use `--no-verify`: it skips the hook (every guard below lives there) and CI still fails.
 - Review `git status` and `git diff` before staging. Stage deliberately (`git add <paths>`); never `git add .` blindly. `.env` is gitignored — if it somehow shows up, stop and tell the user.
-- **Know the commit guard** (`.Codex/hooks/guard_commit.py`) — three deterministic blocks, each with a message telling you the fix:
-  1. `--no-verify` → always blocked; fix the findings instead.
-  2. OpenWiki stale for the staled changes → update the affected pages and stage them **with** the code (or run `/openwiki`). After a mixed code+wiki commit, re-stamp and commit the metadata:
-     `node .Codex/skills/openwiki/scripts/openwiki-meta.mjs record update --pages <pages>` → `git add openwiki && git commit -m "docs(openwiki): re-stamp verified heads"`. Deliberate exception: prefix `OPENWIKI_SKIP=1` and say why.
-  3. Code-bearing commit without a `pyproject.toml` version bump → bump per section 3, or prefix `VERSION_OK=1` when the bump rides in a later commit of the same unit.
+- **Know the commit guard** — the git pre-commit hook (`.agents/git-hooks/pre_commit.py`, enabled once per clone with `git config core.hooksPath .agents/git-hooks`) runs four deterministic checks on what you staged and reports every finding at once, each with its fix:
+  1. Staged `.env` / `.env.*` (other than `.env.example`) → unstage it (`git restore --staged <file>`); new keys with placeholder values belong in `.env.example`.
+  2. App code (`app/`, `main.py`) without a `pyproject.toml` version bump → bump per section 3, or set `VERSION_OK=1` when the bump rides in a later commit of the same unit. (Also needed for `docs`/`chore`/`ci`/`test`/`build`/`style` commits that touch `app/` — a git hook cannot see the commit message.)
+  3. Ruff lint/format findings in staged Python → `python -m ruff check --fix <files>` and `python -m ruff format <files>`, then re-stage.
+  4. An OpenWiki page is stale (its source files changed since it was last verified) and not staged along → update the affected pages and stage them **with** the code (or run `/openwiki`). After a mixed code+wiki commit, re-stamp and commit the metadata:
+     `node .agents/skills/openwiki/scripts/openwiki-meta.mjs record update --pages <pages>` → `git add openwiki && git commit -m "docs(openwiki): re-stamp verified heads"`. Deliberate exception: set `OPENWIKI_SKIP=1` and say why.
+
+  The escape hatches are environment variables for that one commit — bash: `VERSION_OK=1 git commit ...`; PowerShell: `$env:VERSION_OK = "1"; git commit ...` (then `Remove-Item Env:VERSION_OK`).
 
 ## 1. Branch
 
@@ -50,7 +53,7 @@ Bump `version` once per shippable unit (PR or push to `dev`), driven by the high
 - `feat` → **minor**
 - `fix` / everything else → **patch**
 
-Include the bump in the (last) commit; don't make a separate "bump version" commit. When a unit spans multiple code commits, prefix the earlier ones with `VERSION_OK=1` and carry the bump in the final commit — the guard checks each commit individually.
+Include the bump in the (last) commit; don't make a separate "bump version" commit. When a unit spans multiple code commits, set `VERSION_OK=1` on the earlier ones and carry the bump in the final commit — the hook checks each commit individually.
 
 ## 4. Push
 

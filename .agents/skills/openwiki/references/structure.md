@@ -58,13 +58,13 @@ Rules:
 
 ## Agent instruction file convention
 
-Unless the user explicitly says not to, ensure the repository's top-level agent instruction files reference the wiki:
+Unless the user explicitly says not to, ensure the repository's top-level agent instruction file references the wiki:
 
-- Only consider top-level `AGENTS.md` and `CLAUDE.md`. Never edit nested ones.
-- If either exists, add or update the OpenWiki reference section there. If both exist, add the same section to both.
-- If neither exists, create top-level `AGENTS.md` containing only the section.
+- Only consider the top-level `AGENTS.md` — the single source of agent instructions. Never edit nested ones. A top-level `CLAUDE.md`, if present, is just a one-line pointer to `AGENTS.md`: leave it alone.
+- If `AGENTS.md` exists, add or update the OpenWiki reference section there.
+- If it does not exist, create top-level `AGENTS.md` containing only the section.
 - Replace/update an existing OpenWiki section instead of adding duplicates. Preserve all surrounding content.
-- Do not touch these files just to normalize formatting if the existing section is already semantically correct.
+- Do not touch the file just to normalize formatting if the existing section is already semantically correct.
 
 Use this exact section structure every time:
 
@@ -78,7 +78,7 @@ Start here:
 
 Targeted lookup — before modifying source files, find the relevant docs for exactly those files:
 
-    node .claude/skills/openwiki/scripts/openwiki-meta.mjs map <file...>
+    node .agents/skills/openwiki/scripts/openwiki-meta.mjs map <file...>
 
 (If that script is not present in this checkout, fall back to reading the quickstart and following its links. Each wiki page's frontmatter lists the source globs it covers and a read-when hint.)
 

@@ -9,7 +9,7 @@ Requirements: **Python 3.13+** and **Node 22+** (frontend only).
 ```bash
 python -m venv .venv && . .venv/Scripts/activate   # or bin/activate on Linux
 pip install -r requirements.txt -r requirements-dev.txt
-pre-commit install
+git config core.hooksPath .agents/git-hooks   # enable the commit guards (once per clone)
 
 cd frontend && npm ci
 ```
@@ -31,7 +31,9 @@ python -m pytest
 
 Frontend changes additionally need `npm run build` (vue-tsc type-check + Vite build) to pass.
 
-`pre-commit install` wires all of this into `git commit`, plus a `detect-secrets` scan. Never commit with `--no-verify`.
+`git config core.hooksPath .agents/git-hooks` (see Dev setup) enables the repo's pre-commit hook. It blocks a commit that stages `.env` files, changes app code without a `pyproject.toml` version bump, stages Python that fails `ruff check`/`ruff format --check`, or leaves a stale OpenWiki page (its sources changed since it was verified) unstaged, and prints the fix for each. `VERSION_OK=1` and `OPENWIKI_SKIP=1` (environment variables for one commit; state why) are the escape hatches. Never commit with `--no-verify`. On Linux/macOS git ignores a hook that is not executable: `chmod +x .agents/git-hooks/pre-commit`.
+
+The rest of the gate (mypy, bandit, pytest, plus a `detect-secrets` scan) runs in CI and locally with `pre-commit run --all-files`; the `/verify` skill runs the gate without detect-secrets. Don't run `pre-commit install` — it refuses to install while `core.hooksPath` is set.
 
 ## Conventions
 
@@ -46,7 +48,7 @@ Frontend changes additionally need `npm run build` (vue-tsc type-check + Vite bu
 
 - [Conventional Commits](https://www.conventionalcommits.org/): `feat(api): ...`, `fix(vision): ...`, `docs: ...`. Imperative mood, body explains the *why*.
 - Bump `version` in `pyproject.toml` once per shippable unit: `feat` → minor, `fix`/other → patch, breaking → major.
-- **Docs move with code**: the `openwiki/` pages declare which source files they cover; if your change makes a page stale, update it in the same PR. (`node .claude/skills/openwiki/scripts/openwiki-meta.mjs map <file>` tells you which page covers a file.)
+- **Docs move with code**: the `openwiki/` pages declare which source files they cover; if your change makes a page stale, update it in the same PR. (`node .agents/skills/openwiki/scripts/openwiki-meta.mjs map <file>` tells you which page covers a file.)
 - PRs target `main`. Describe what changed, why, and how you tested it — the PR template walks you through it.
 
 ## Reporting bugs

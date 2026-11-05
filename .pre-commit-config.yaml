@@ -1,7 +1,11 @@
-# Git hooks for everyone, regardless of editor. One-time setup per clone:
+# The full local quality gate, run on demand:
 #
 #     pip install -r requirements-dev.txt
-#     pre-commit install
+#     pre-commit run --all-files
+#
+# This config is NOT installed as the git hook: the repo's commit-time guards are
+# .agents/git-hooks (enabled with `git config core.hooksPath .agents/git-hooks`),
+# and `pre-commit install` refuses to install while core.hooksPath is set.
 #
 # All hooks are `language: system`: they run the tools from requirements-dev
 # (same pinned versions as CI and pyproject.toml), need no network, and stay

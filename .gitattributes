@@ -12,3 +12,6 @@
 *.cfg text eol=lf
 *.sh text eol=lf
 *.ps1 text eol=crlf
+
+# Git hooks run under sh, also on Windows: CRLF would break the shebang line.
+.agents/git-hooks/* text eol=lf

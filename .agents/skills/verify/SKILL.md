@@ -25,6 +25,6 @@ Then:
 Notes:
 
 - `python -m pip_audit -r requirements.txt` needs network access; run it only when the user asks for the dependency audit or a pin was changed.
-- This is the same gate pre-commit enforces — a clean `/verify` means the commit will not be rejected by the tooling checks (the commit guard's wiki/semver checks are separate; `/ship` covers those).
-- The Stop hook already sweeps Ruff + mypy after every turn — `/verify` is the deliberate, full pre-ship pass (it adds compileall, Bandit, pytest), not something to run after each edit.
+- This is the same gate CI runs — a clean `/verify` means CI's tooling checks will pass. The git pre-commit hook only covers Ruff on the staged Python files plus the `.env`, semver and OpenWiki guards (`/ship` covers those).
+- `/verify` is the deliberate, full pre-ship pass (Ruff, mypy, compileall, Bandit, pytest), not something to run after each edit — while iterating, run Ruff and pytest on just the files you touched.
 - When iterating on test failures, loop with `python -m pytest --lf` (last failures only) and finish with one full `python -m pytest`.

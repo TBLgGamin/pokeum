@@ -9,8 +9,9 @@ env/
 .ruff_cache/
 .mypy_cache/
 
-# Claude Code — personal overrides (the shared setup in .claude/ is committed)
-.claude/settings.local.json
+# Per-user agent state: the shared agent setup lives only in .agents/, so any local
+# .claude/ (Claude Code writes settings.local.json there) is never committed.
+.claude/
 CLAUDE.local.md
 
 # Local environment / secrets
@@ -35,12 +36,9 @@ frontend/*.tsbuildinfo
 .DS_Store
 Thumbs.db
 
-# Claude Code hook state + mypy daemon (per-clone, never committed)
-.claude/hooks/.check_cache
-.claude/hooks/.state/
-.claude/scratch/
-# Codex hook state (mirrors the Claude rules above)
-.codex/hooks/.check_cache
-.codex/hooks/.state/
+# mypy daemon state (per-clone, never committed)
 .dmypy.json
 dmypy.json
+
+# Agent scratch space: temp scripts, probes, one-off outputs (never the repo root)
+.agents/scratch/

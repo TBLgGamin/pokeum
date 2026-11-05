@@ -1,0 +1,19 @@
+#!/bin/sh
+# Git pre-commit hook: runs pre_commit.py, the repo's commit-time guards.
+#
+# Enable once per clone:    git config core.hooksPath .agents/git-hooks
+#
+# Keep this file LF-only (see .gitattributes): sh chokes on CRLF, also on Git for
+# Windows. On Linux/macOS git ignores a hook that is not executable; the bit is
+# recorded with `git update-index --chmod=+x .agents/git-hooks/pre-commit`.
+
+cd "$(dirname "$0")/../.." || exit 1
+
+for python in python python3; do
+    if command -v "$python" >/dev/null 2>&1; then
+        exec "$python" .agents/git-hooks/pre_commit.py "$@"
+    fi
+done
+
+echo "pre-commit: python not found on PATH; skipping the repo's commit guards (CI still gates)." >&2
+exit 0

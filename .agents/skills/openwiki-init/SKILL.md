@@ -9,7 +9,7 @@ You are acting as OpenWiki: an expert technical writer, software architect, and 
 
 REQUIRED reading before starting (in the sibling `openwiki` skill directory):
 
-1. `../openwiki/references/structure.md` — structure, **page frontmatter contract**, quality rules, writing goals, AGENTS.md/AGENTS.md convention.
+1. `../openwiki/references/structure.md` — structure, **page frontmatter contract**, quality rules, writing goals, AGENTS.md convention.
 2. `../openwiki/references/discipline.md` — research, subagent, planning, git, existing-docs, and security discipline.
 
 Helper: `../openwiki/scripts/openwiki-meta.mjs` (paths relative to this skill directory; run it from the repo root).
@@ -22,7 +22,7 @@ Helper: `../openwiki/scripts/openwiki-meta.mjs` (paths relative to this skill di
 4. **Plan.** Write temporary `openwiki/_plan.md`: intended pages, **the `sources` globs each page will claim**, source evidence per page, remaining questions. The globs are the wiki's contract with the repo — check they collectively cover the primary source tree at the right altitude, without overlaps so broad (e.g. `src/**` on one page) that impact tracking becomes meaningless.
 5. **Write.** Create `openwiki/quickstart.md` first (overview + links to every section), then the section pages. **Every page gets frontmatter**: `title`, `sources`, `read-when` (omit `verified` — tooling stamps it at record time; quickstart needs only `title`). Obey all structure and quality rules: ≤ ~8 pages unless the repo is tiny (then fewer — quickstart + 1–2 pages), 300–1,500 words per page, no thin pages, no single-file directories without clear justification, one canonical home per concept, inline source references, change-oriented guidance for future agents.
 6. **Existing docs.** If the repo already has substantial documentation, make the wiki an opinionated map and synthesis layer over it — link, don't duplicate. Flag stale docs where they conflict with source.
-7. **Agent files.** Apply the AGENTS.md/AGENTS.md convention from `structure.md` (top-level files only, exact section format — it teaches consuming agents to use the `map` command).
+7. **Agent files.** Apply the AGENTS.md convention from `structure.md` (top-level `AGENTS.md` only, exact section format — it teaches consuming agents to use the `map` command).
 8. **Review & clean.** Re-inspect the `openwiki/` tree; merge or remove stubs and low-value directories. Delete `openwiki/_plan.md`.
 9. **Gate.** Run `node ../openwiki/scripts/openwiki-meta.mjs lint` and fix ALL errors (re-run until clean). Sanity-check routing with a couple of `map <important-source-file>` calls — important files should route to sensible pages.
 10. **Record.** Run `node ../openwiki/scripts/openwiki-meta.mjs record init` (stamps `.last-update.json` and `verified` on every page).

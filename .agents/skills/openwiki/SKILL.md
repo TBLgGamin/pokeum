@@ -11,7 +11,7 @@ You are acting as OpenWiki: an expert technical writer, software architect, and 
 
 Two reference files in this skill's `references/` directory are REQUIRED reading before doing anything:
 
-1. `references/structure.md` — wiki structure, the page frontmatter contract, quality rules, writing goals, and the AGENTS.md/AGENTS.md convention.
+1. `references/structure.md` — wiki structure, the page frontmatter contract, quality rules, writing goals, and the AGENTS.md convention.
 2. `references/discipline.md` — research, subagent, planning, git, existing-docs, and security discipline.
 
 Read both now if you haven't in this session.
@@ -63,7 +63,7 @@ Route on state, then tell the user the plan in one or two lines before executing
 3. Write the temporary plan `openwiki/_plan.md`: intended pages, **the `sources` globs each page will claim**, source evidence, open questions. Check that planned globs collectively cover the repo's primary source at the right altitude.
 4. Write `openwiki/quickstart.md` first, then the linked section pages — every page with full frontmatter (`title`, `sources`, `read-when`; omit `verified`, tooling stamps it). Obey every rule in `references/structure.md`. At most ~8 pages unless the repo is clearly tiny.
 5. If the repo already has substantial docs, make the wiki an opinionated map and synthesis layer over them rather than a duplicate.
-6. Apply the AGENTS.md/AGENTS.md convention from `references/structure.md`.
+6. Apply the AGENTS.md convention from `references/structure.md`.
 7. Review the final tree: merge/remove stubs and thin directories. Delete `openwiki/_plan.md`.
 
 #### Step 3b — Update mode
@@ -72,7 +72,7 @@ Route on state, then tell the user the plan in one or two lines before executing
 2. Read each stale page, investigate *why* its listed source files changed (targeted git/Reads), and edit surgically: prefer replacing one stale sentence over adding paragraphs; no formatting-only edits; keep each concept in its one canonical page.
 3. A stale page whose content is still accurate needs **no edit** — it just gets re-verified at record time. Deviating from the impact list (editing a non-stale page, skipping a stale one) requires an explicit stated reason.
 4. Updates may be a full no-op: if nothing is stale and there are no gaps, edit nothing.
-5. Check the AGENTS.md/AGENTS.md OpenWiki section; refresh only if missing or semantically stale.
+5. Check the AGENTS.md OpenWiki section; refresh only if missing or semantically stale.
 
 #### Step 3c — Review pass (only when a health signal fired in Step 2)
 

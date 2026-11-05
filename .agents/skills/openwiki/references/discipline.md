@@ -1,6 +1,6 @@
 # OpenWiki run discipline
 
-How to research and behave during any openwiki run. These rules assume Claude Code's native tools (Read, Write, Edit, Glob, Grep, Bash, Explore subagents) operating on real repository paths.
+How to research and behave during any openwiki run. These rules assume a coding agent's native tools (read, write, edit, glob, grep, shell, read-only exploration subagents) operating on real repository paths.
 
 ## Research discipline
 
@@ -41,4 +41,4 @@ How to research and behave during any openwiki run. These rules assume Claude Co
 
 - Do not read or document secret values, credentials, private keys, tokens, or `.env` files. `.env.example` and other sample config may be read only if it contains placeholders.
 - If a secret-bearing file seems relevant, document only that such configuration exists and where non-sensitive setup belongs.
-- Keep all documentation under `openwiki/`. Do not modify source code outside `openwiki/` — the only exceptions are top-level `AGENTS.md` / `CLAUDE.md`, and only for the OpenWiki reference section defined in `structure.md`.
+- Keep all documentation under `openwiki/`. Do not modify source code outside `openwiki/` — the only exception is top-level `AGENTS.md`, and only for the OpenWiki reference section defined in `structure.md`.

@@ -1,9 +1,0 @@
-[shell_environment_policy]
-inherit = "core"
-
-[shell_environment_policy.set]
-NO_COLOR = "1"
-PY_COLORS = "0"
-PYTHONDONTWRITEBYTECODE = "1"
-PIP_DISABLE_PIP_VERSION_CHECK = "1"
-PYTHONUTF8 = "1"

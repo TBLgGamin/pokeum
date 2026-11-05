@@ -5,8 +5,8 @@ ruff==0.15.16
 pytest==8.3.3
 mypy==2.1.0
 
-# Git-hook runner: `pre-commit install` once per clone, then every commit is
-# linted, formatted, type-checked, secret-scanned and tested automatically.
+# Hook-config runner for the full local gate: `pre-commit run --all-files` lints,
+# formats, type-checks, secret-scans and tests the whole repo on demand.
 pre-commit==4.6.0
 detect-secrets==1.5.0
 

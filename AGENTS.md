@@ -1,15 +1,24 @@
 # pokeum
 
-Project rules live in `.claude/rules/` (workflow, conventions, config, tests) and are always in effect — they are agent-agnostic and apply to Codex sessions too. Codex-specific skills live in `.agents/skills/`; the Codex harness config and hooks live in `.codex/`.
+All coding-agent configuration lives in one place, `.agents/`, shared by every agent (Claude Code, Codex, ...) and by humans:
+
+- `.agents/rules/` — the project rules (workflow, conventions, config, tests). They are always in effect: read all four at the start of a session.
+- `.agents/skills/` — task skills (`/verify`, `/ship`, `/new-setting`, `/runbook-add`, `/tune`, `/openwiki*`).
+- `.agents/git-hooks/` — the git pre-commit hook that enforces the repo's guards (below).
+- `.agents/scratch/` — gitignored scratch space for temp scripts, probes, and one-off outputs; never the repo root.
+
+`CLAUDE.md` is only a pointer to this file.
 
 ## Guardrails & automation
 
-The repo automates its own discipline — work with it, not around it:
+The repo enforces its discipline with one real git hook instead of agent-harness hooks, so it works the same for any agent or human. One-time setup per clone:
 
-- **SessionStart** injects a repo brief (branch, dirty files, wiki freshness) — trust it instead of re-deriving.
-- **On every Write/Edit** the touched Python file is auto-formatted (Ruff); a **Stop** check reports repo-wide lint/type leftovers (capped output). Never run formatters manually.
-- **`.env` and variants are blocked** (hook + permission deny); change `.env.example` instead.
-- **`git commit` is guarded**: `--no-verify` is always refused, and commits are blocked while the OpenWiki is stale for the changes being committed — update the wiki first, or prefix with `OPENWIKI_SKIP=1` for a deliberate, explained exception.
+    git config core.hooksPath .agents/git-hooks
+
+- **The pre-commit hook** (`.agents/git-hooks/pre_commit.py`) checks the staged changes and blocks the commit with a message telling you the fix when: `.env`/`.env.*` files (except `.env.example`) are staged; app code (`app/`, `main.py`) is staged without a `pyproject.toml` version bump (escape hatch: `VERSION_OK=1`); staged Python fails `ruff check` or `ruff format --check`; or an OpenWiki page is stale (its source files changed since it was last verified) and is not staged with the commit — update the pages and stage them with the code (escape hatch for a deliberate, explained exception: `OPENWIKI_SKIP=1`). The escape hatches are environment variables for that one commit.
+- **Never `git commit --no-verify`** — it skips the hook entirely, and CI runs the full gate anyway.
+- **Nothing formats on save**: run `python -m ruff check --fix <files>` and `python -m ruff format <files>` on the Python files you touched before staging.
+- **`.env` and variants hold real secrets**: never read or edit them; change `.env.example` instead and ask the developer to mirror keys.
 - **Optional token saver**: start sessions through `scripts/claude-headroom.ps1`/`.sh` to run behind the Headroom compression proxy (installed via `requirements-dev.txt`; running the agent CLI directly always works too).
 
 ## OpenWiki

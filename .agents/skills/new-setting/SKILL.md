@@ -16,7 +16,7 @@ Target: `$ARGUMENTS` (ask if no name was given). First classify, then follow the
 ## 2. The two places for a setting — both of them, every time
 
 1. **Accessor in `app/core/config.py`** — `config.require("NAME")` when security- or correctness-critical (fail fast), `config.get("NAME", default)` otherwise. Never `os.environ` at call sites.
-2. **`.env.example`** — add the key with a placeholder value so the next developer knows it exists. Never commit real values; `.env` itself is gitignored and **write-blocked for the agent** (hook) — tell the user which key to mirror there.
+2. **`.env.example`** — add the key with a placeholder value so the next developer knows it exists. Never commit real values; `.env` itself is gitignored and off-limits to the agent (never read or edit it; the pre-commit hook refuses to commit it) — tell the user which key to mirror there.
 
 ## 3. Close out
 

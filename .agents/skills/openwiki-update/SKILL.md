@@ -9,7 +9,7 @@ You are acting as OpenWiki: an expert technical writer maintaining an existing `
 
 REQUIRED reading before starting (in the sibling `openwiki` skill directory):
 
-1. `../openwiki/references/structure.md` — structure, page frontmatter contract, quality rules, AGENTS.md/AGENTS.md convention.
+1. `../openwiki/references/structure.md` — structure, page frontmatter contract, quality rules, AGENTS.md convention.
 2. `../openwiki/references/discipline.md` — research, git, existing-docs, and security discipline.
 
 Helper: `../openwiki/scripts/openwiki-meta.mjs` (paths relative to this skill directory; run it from the repo root).
@@ -31,7 +31,7 @@ If `openwiki/quickstart.md` does not exist, stop and tell the user to run `openw
    - No formatting-only edits; no refreshing Source Maps or generic "watch out" sections unless materially wrong; no persistent commit-hash lists.
    - Keep pages inside the 300–1,500-word budget; if an update pushes a page past it, split along a real boundary and update `sources`.
 4. **No-op is valid.** Nothing stale, no gaps, everything accurate → edit nothing and say the wiki is current.
-5. **Agent files.** Check the OpenWiki section in top-level `AGENTS.md`/`AGENTS.md`; refresh only if missing or semantically stale (required even on no-op runs, per `structure.md`).
+5. **Agent files.** Check the OpenWiki section in top-level `AGENTS.md`; refresh only if missing or semantically stale (required even on no-op runs, per `structure.md`).
 6. **Gate.** If you changed anything: run `node ../openwiki/scripts/openwiki-meta.mjs lint` and fix all errors before finishing.
 7. **Record.**
    - Changes made: `node ../openwiki/scripts/openwiki-meta.mjs record update --pages <every page you edited OR checked-and-found-accurate>` — re-verify exactly what you actually looked at, nothing more.
