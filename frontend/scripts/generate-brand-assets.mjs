@@ -8,7 +8,8 @@
  *   2. copies the set's ready-made web exports into `public/` under the names
  *      the manifest and `index.html` use (the set's art is never re-drawn),
  *   3. renders only what the set lacks (152/167px apple icons, 64px PWA icon,
- *      the og images, the docs PNG kit) from its SVGs,
+ *      the square og image, the docs PNG kit) from its SVGs, and crops the wide
+ *      og image and GitHub social preview from `docs/media/pokeum-hero.png`,
  *   4. reads every output back and throws if a size, format or opacity
  *      requirement is violated, then prints the asset table.
  *
@@ -237,28 +238,37 @@ if (maskableOk(await inspectVioletIcon(setMaskable))) {
 track(maskableTarget, 512, 512, "png", { opaque: true });
 
 // ---------------------------------------------------------------------------
-// 4. Link previews: stacked lockup centred on white (the approved light pair).
-// No tagline: the renderer has no fonts, and the wordmark is outlined art.
+// 4. Link previews. The wide ones are the README hero ("Know your cards. Keep
+// it local."), docs/media/pokeum-hero.png, a 2:1 master: centre-cropped to the
+// Open Graph 1200x630 card and resized to GitHub's 1280x640 social preview
+// (uploaded by hand in the repo settings; GitHub has no API for it). Both are
+// JPEG: the hero is a photo, and as PNG it exceeds GitHub's 1 MB upload limit
+// and the ~300 KB chat apps fetch for previews. The square preview cannot hold
+// the wide composition, so it stays the stacked lockup on white.
 // ---------------------------------------------------------------------------
-/**
- * @param {string} target output path
- * @param {number} width canvas width
- * @param {number} height canvas height
- * @param {number} lockupWidth lockup width; its height follows the 3639x2661 viewBox
- */
-async function renderPreview(target, width, height, lockupWidth) {
-  const lockup = await (await rasterize(svgDir("pokeum-stacked.svg"), lockupWidth)).png().toBuffer();
-  await writePng(
-    sharp({ create: { width, height, channels: 4, background: WHITE } }).composite([{ input: lockup, gravity: "centre" }]),
-    target,
-    WHITE,
-  );
-  track(target, width, height, "png", { opaque: true });
+const hero = resolve(repoRoot, "docs/media/pokeum-hero.png");
+for (const [target, width, height] of [
+  [resolve(publicDir, "og-image.jpg"), 1200, 630],
+  [resolve(repoRoot, "docs/media/social-preview.jpg"), 1280, 640],
+]) {
+  await sharp(hero)
+    .resize({ width, height, fit: "cover", position: "centre" })
+    .jpeg({ quality: 84, mozjpeg: true })
+    .toFile(target);
+  track(target, width, height, "jpeg");
 }
-// Lockup ≈ 60% of the shorter canvas side: far more than the 1-stem clear space,
-// and the 1200x630 card survives a centre crop to 1:1 or 4:3 unclipped.
-await renderPreview(resolve(publicDir, "og-image.png"), 1200, 630, 517);
-await renderPreview(resolve(publicDir, "og-image-square.png"), 1024, 1024, 614);
+
+// Lockup ≈ 60% of the canvas side: far more than the 1-stem clear space.
+const squareLockup = await (await rasterize(svgDir("pokeum-stacked.svg"), 614)).png().toBuffer();
+const squareTarget = resolve(publicDir, "og-image-square.png");
+await writePng(
+  sharp({ create: { width: 1024, height: 1024, channels: 4, background: WHITE } }).composite([
+    { input: squareLockup, gravity: "centre" },
+  ]),
+  squareTarget,
+  WHITE,
+);
+track(squareTarget, 1024, 1024, "png", { opaque: true });
 
 // ---------------------------------------------------------------------------
 // 5. Docs PNG kit (transparent; small on purpose, the SVGs stay the masters).

@@ -1,138 +1,209 @@
-# pokeum
+<p align="center">
+  <img src="docs/media/pokeum-hero.png" alt="pokeum: Know your cards. Keep it local." width="100%">
+</p>
 
-[![CI](https://github.com/TBLgGamin/pokeum/actions/workflows/ci.yml/badge.svg)](https://github.com/TBLgGamin/pokeum/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-![Python 3.13](https://img.shields.io/badge/python-3.13-blue)
+<p align="center">
+  <strong>Know your cards. Keep it local.</strong>
+</p>
 
-![pokeum — a Pokémon card being scanned in the pokeum app](docs/media/pokeum-hero.png)
+<p align="center">
+  <a href="https://pokeum.wena.one"><strong>Try it live</strong></a>
+  &middot;
+  <a href="#quick-start">Self-host</a>
+  &middot;
+  <a href="openwiki/quickstart.md">Documentation</a>
+  &middot;
+  <a href="https://github.com/TBLgGamin/pokeum/releases">Releases</a>
+</p>
 
-Point your phone at a Pokémon card and pokeum tells you **exactly which printing it is** — name, set, and collector number (e.g. *Pikachu · Paldea Evolved · 025/193*) plus print variants like reverse holo or 1st Edition. Scan card after card, build your collection, export it as a TCGplayer-ready CSV.
+<p align="center">
+  <a href="https://github.com/TBLgGamin/pokeum/actions/workflows/ci.yml"><img src="https://github.com/TBLgGamin/pokeum/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/TBLgGamin/pokeum/releases/latest"><img src="https://img.shields.io/github/v/release/TBLgGamin/pokeum" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/python-3.13-blue" alt="Python 3.13">
+</p>
 
-Fully self-hosted: a FastAPI recognition service plus an installable web app (PWA). No accounts, no cloud dependency, no per-scan fees.
+---
 
-<!-- TODO: in-app screenshots — docs/media/scan.gif (live scan → match sheet) and docs/media/collection.png (collection grid) -->
+pokeum identifies Pokémon trading cards from a photo. Point your phone at a card and it names the exact printing (card, set and collector number, for example *Pikachu, Paldea Evolved, 025/193*) along with print variants such as reverse holo or 1st Edition. Scan a stack, keep the list in your browser and export it to the tracker you already use.
+
+It is self-hosted and needs no account: a single Python service runs recognition on the CPU and serves an installable web app. Nothing about your collection leaves your device unless you export it.
+
+## Table of contents
+
+- [Features](#features)
+- [Try it](#try-it)
+- [Quick start](#quick-start)
+- [Usage](#usage)
+- [Configuration](#configuration)
+- [How it works](#how-it-works)
+- [Deployment](#deployment)
+- [Development](#development)
+- [Contributing](#contributing)
+- [Security](#security)
+- [Acknowledgements](#acknowledgements)
+- [License](#license)
 
 ## Features
 
-- **📸 Live camera scanning** — point, tap, confirm. A guide frame crops the capture; the match sheet shows the card art for a one-tap save. Photo upload works too.
-- **🧠 Multi-signal recognition, no per-set training** — perceptual hashes + a fine-tuned DINOv2 image encoder (ONNX, CPU-only at runtime) + OCR of the collector number and the card name + set-symbol matching, fused into one confidence-ranked answer. Upside-down and sideways cards are handled, and an unsure camera scan quietly takes a few more frames before answering. A newly released set becomes recognizable with one data sync — never a retrain.
-- **✨ Variant detection** — reverse holo, 1st Edition, shadowless, promo stamps.
-- **📱 Installable app** — the website is a PWA: "Add to Home Screen" on Android and iOS gives an app icon, fullscreen launch, offline card art, and a collection that persists on the device.
-- **📤 Collection export** — TCGplayer-style CSV.
-- **🔒 Your infrastructure** — one Python service serves both the API and the built frontend as a single origin. Card images come straight from the TCGdex CDN, so the server stays lean (~250 MB of data artifacts).
+- **Hands-free scanning.** Hold a card in the guide and it is captured as soon as the frame is usable; when one frame is not decisive, a few more are taken and combined.
+- **Exact printings, not just names.** Perceptual hashes, a fine-tuned DINOv2 image encoder, OCR of the collector number and the card name, and set-symbol matching are fused into one ranked answer. Reprints that share artwork are told apart by their printed details.
+- **Print variants.** Reverse holo, 1st Edition, shadowless and promo stamps.
+- **Robust to real photos.** Cards upside down, sideways, in sleeves, at an angle or under glare are handled.
+- **No retraining for new sets.** Recognition is a lookup against reference images from [TCGdex](https://tcgdex.dev); a new set becomes recognisable after one data sync.
+- **Photo upload.** Identify cards from existing photos as well as the live camera.
+- **Collection export.** TCGplayer CSV, a full spreadsheet CSV, Pokémon TCG Live deck lists, a readable checklist and a JSON backup.
+- **Installable web app.** Add it to your home screen on Android or iOS for a full-screen app with offline card art.
+- **Runs on modest hardware.** ONNX Runtime on the CPU; no GPU and no PyTorch at runtime.
 
-## Quickstart (self-host)
+## Try it
 
-Requirements: Python 3.13+, Node 22+ (only to build the frontend), ~2 GB disk for the full catalogue on the machine that builds the index.
+A hosted instance runs at **[pokeum.wena.one](https://pokeum.wena.one)**. Open it on a phone, allow camera access and hold a card in the frame.
+
+Your collection is stored only in that browser. There is no account or cloud copy, so export it before clearing site data or switching devices.
+
+## Quick start
+
+### Prerequisites
+
+- Python 3.13 or newer
+- Node.js 22 or newer (only to build the web app)
+- About 2 GB of free disk space on the machine that builds the index
+
+### Installation
 
 ```bash
-# 1. backend deps
-python -m venv .venv && . .venv/Scripts/activate   # or bin/activate on Linux
+git clone https://github.com/TBLgGamin/pokeum.git
+cd pokeum
+
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-# 2. the fine-tuned image encoder (one file, ~85 MB, from GitHub Releases)
+# Fine-tuned image encoder (about 85 MB)
 curl -L --create-dirs -o data/models/dinov2s-ft-v1.onnx \
   https://github.com/TBLgGamin/pokeum/releases/latest/download/dinov2s-ft-v1.onnx
 
-# 3. reference data: download the card catalogue from TCGdex (once, ~20k cards)
+# Card catalogue from TCGdex, then the matching index (run once, and after new sets)
 python main.py sync
-
-# 4. precompute the matching index (hashes + embeddings)
 python main.py index build
 
-# 5. build the web app
+# Web app
 cd frontend && npm ci && npm run build && cd ..
 
-# 6. serve — API under /api, web app at the root
-python main.py serve            # http://127.0.0.1:8000
+# Serve the API under /api and the web app at /
+python main.py serve
 ```
 
-Or skip the frontend and use the CLI directly:
+Open <http://127.0.0.1:8000>. Browsers only allow the camera on HTTPS or `localhost`; see [Deployment](#deployment) for serving it to a phone.
+
+## Usage
+
+### Web app
+
+| Screen | What it does |
+| --- | --- |
+| Scan | Live camera with automatic capture. Confirm the match to add it to your collection. |
+| Upload | Identify a card from a photo on your device. |
+| Collection | Search your cards, adjust quantities and export. |
+
+### Command line
 
 ```bash
-python main.py identify my_card_photo.jpg
-python main.py scan             # live webcam mode
+python main.py identify path/to/card.jpg     # identify one image
+python main.py scan                          # live webcam recognition
+python main.py serve --host 0.0.0.0          # HTTP service and web app
+python main.py eval data/eval/real           # accuracy scorecard over labelled images
+python main.py bench path/to/card.jpg        # latency and throughput
 ```
 
-Configuration is environment-based with sensible defaults — see [`.env.example`](.env.example) for every key (`python main.py` auto-loads a local `.env`).
+Run `python main.py <command> --help` for every option.
 
-> **Camera + install need HTTPS.** Browsers only expose the camera and the PWA install prompt on secure origins. For production put the service behind TLS — a [Cloudflare Tunnel](deploy/README.md) or any reverse proxy works; `localhost` is exempt during development.
+### HTTP API
 
-### Install it as an app
+| Method | Path | Description |
+| --- | --- | --- |
+| `POST` | `/api/identify` | Identify one image (multipart field `file`). |
+| `POST` | `/api/identify/burst` | Identify one card from up to four frames (multipart field `files`). |
+| `GET` | `/api/cards/{card_id}` | Card details. |
+| `GET` | `/api/cards/{card_id}/image` | Reference image. |
+| `GET` | `/api/health` | Readiness, indexed card count and the active encoder. |
 
-Open your deployed site on a phone:
+Request and response shapes are documented in [`openwiki/service-and-cli.md`](openwiki/service-and-cli.md).
 
-- **Android (Chrome):** tap the "Install app" prompt, or ⋮ → *Add to Home screen*.
-- **iOS (Safari):** Share → *Add to Home Screen*.
+## Configuration
 
-Scanned collections are stored on the device and survive restarts; card art is cached for offline viewing.
+pokeum is configured through environment variables, and `main.py` loads a local `.env` file if one exists. Every setting, its default and its purpose is listed in [`.env.example`](.env.example). The most common ones:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `DATA_DIR` | `./data` | Catalogue, index and model location |
+| `EMBED_MODEL_PATH` | `./data/models/dinov2s-ft-v1.onnx` | Image encoder; when missing, a simpler fallback is used |
+| `API_HOST` / `API_PORT` | `127.0.0.1` / `8000` | Bind address of `serve` |
+| `IDENTIFY_MAX_CONCURRENCY` | `2` | Recognitions run in parallel before requests are shed with `503` |
+| `FRONTEND_DIST_DIR` | `./frontend/dist` | Built web app served at `/` |
 
 ## How it works
 
-pokeum never trains a model to recognize cards — it **looks cards up**. Every card has a clean reference image on [TCGdex](https://tcgdex.dev); pokeum downloads those once, fingerprints each (perceptual hashes + embeddings from a **frozen** encoder), and stores them in an index. Recognizing a photo is: find the card's outline, perspective-flatten it, fingerprint it the same way, and take the nearest neighbour — with the OCR'd collector number settling ties between reprints that share artwork.
+pokeum never learns individual cards. It downloads a clean reference image of every card once, fingerprints each one and stores the fingerprints in an index. Recognising a photo means finding the card in it, straightening it, fingerprinting it the same way and looking it up.
 
 ```mermaid
-flowchart TD
-    subgraph ref["📚 Reference side — run once, and again per new set (minutes, no training)"]
-        TCG["TCGdex API<br/>~22k card images + metadata"] --> SYNC["sync<br/>download into SQLite + image cache"]
-        SYNC --> IDX["index build<br/>fingerprint every card:<br/>perceptual hashes + embeddings"]
-        IDX --> STORE[("the index<br/>hashes · embedding matrices · card DB")]
+flowchart LR
+    subgraph Reference["Reference data (once per set)"]
+        TCG[TCGdex catalogue] --> SYNC[sync] --> IDX[index build:<br/>hashes and embeddings]
     end
-
-    subgraph rec["📸 Recognition side — every photo / webcam frame (milliseconds)"]
-        IMG["photo or frame"] --> DET["detect the card's outline<br/>(OpenCV contours)"]
-        DET --> WARP["straighten it —<br/>perspective-warp to a flat 630×880 card"]
-        WARP --> SIG["run 4 signals in parallel"]
-        SIG --> H["hashes<br/>great on clean images"]
-        SIG --> E["embeddings (frozen encoder)<br/>robust to glare & angle"]
-        SIG --> O["OCR the bottom strip<br/>'025/193' + set code"]
-        SIG --> SYM["set-symbol match<br/>for old cards w/o set code"]
-        H & E & SYM --> FUSE["fuse into one ranked list<br/>(weighted scores)"]
-        O -- "boosts cards whose printed<br/>number agrees, never a hard gate" --> FUSE
-        FUSE --> DECIDE{"confident?"}
-        DECIDE -- yes --> VAR["check print variants on the winner:<br/>reverse holo · 1st Edition · shadowless · promo stamp"]
-        DECIDE -- close call --> ALT["return best guess + alternates"]
-        VAR --> OUT(["🎴 Pikachu · Paldea Evolved · 025/193<br/>confidence 0.93 · reverse holo"])
+    subgraph Recognition["Every photo"]
+        IMG[Photo] --> DET[Find and straighten<br/>the card]
+        DET --> SIG[Hashes, embeddings,<br/>number and name OCR,<br/>set symbol]
+        SIG --> FUSE[Fuse and decide]
+        FUSE --> OUT[Exact printing<br/>and variants]
     end
-
-    subgraph train["🏋️ Training side — one-time, optional, on a GPU box"]
-        AUG["clean renders + synthetic damage:<br/>glare · perspective · blur · fingers"] --> FT["fine-tune the encoder to ignore<br/>photography, not to know cards"]
-        FT --> ONNX["export to ONNX"]
-    end
-
-    STORE -.->|"nearest-neighbour lookup"| E
-    STORE -.->|"validates number/total"| O
-    ONNX -.->|"drop in + reindex —<br/>new sets still need no training"| IDX
+    IDX -.-> SIG
 ```
 
-The encoder was fine-tuned once, on synthetic photo distortions (glare, perspective, blur, fingers), to learn that a bad photo of a card *is* that card — it learned to ignore cameras, not to memorize cards, which is why new sets never need training. Runtime inference is ONNX on CPU; PyTorch is never a server dependency.
-
-Deeper docs live in [`openwiki/quickstart.md`](openwiki/quickstart.md) — the recognition pipeline, reference data, service/CLI surface, and the optional training harness.
+The image encoder is a DINOv2-small model fine-tuned once on synthetic photo damage (glare, perspective, blur, fingers) so that it ignores the camera rather than memorising cards. That is why new sets need no training. The full pipeline, its thresholds and measured accuracy are described in [`openwiki/recognition-pipeline.md`](openwiki/recognition-pipeline.md), and the training harness is in [`training/`](training/README.md).
 
 ## Deployment
 
-The service is a single process: run `python main.py serve` under your process manager of choice (systemd, Docker, …) and put TLS in front of it (reverse proxy or a Cloudflare Tunnel pointing at `http://127.0.0.1:8000`). A production server only needs ~165 MB of data artifacts — `data/reference.db`, `data/index/`, `data/symbols/`, and the ONNX model; card images are served from the TCGdex CDN, so `data/images/` (~380 MB) can stay on the machine that built the index. Recommended production env: `API_HOST=127.0.0.1`, `LOG_JSON=true`, `FRONTEND_DIST_DIR=./frontend/dist`.
+The service is one process. Run `python main.py serve` under a process manager and put TLS in front of it, for example a reverse proxy or a Cloudflare Tunnel to `http://127.0.0.1:8000`. A production host needs only the catalogue database, the index, the set symbols and the model (about 165 MB); card images are served from the TCGdex CDN.
+
+[`deploy/`](deploy/README.md) contains a systemd unit, a Cloudflare Tunnel example and step-by-step notes.
 
 ## Development
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
-git config core.hooksPath .agents/git-hooks   # enable the commit guards (once per clone)
-cd frontend && npm ci && npm run dev   # Vite dev server proxying /api to :8000
+git config core.hooksPath .agents/git-hooks     # enable the pre-commit checks
+cd frontend && npm ci && npm run dev            # Vite dev server, proxies /api to :8000
 ```
 
-The quality gate (`ruff check`, `ruff format --check`, `mypy`, `bandit`, `pytest`) runs in CI and on demand; the commit hook enforces Ruff on the staged files plus the semver, docs-freshness and no-`.env` guards. The test suite is fully offline. See [CONTRIBUTING.md](CONTRIBUTING.md).
+| Check | Command |
+| --- | --- |
+| Lint and format | `python -m ruff check .` and `python -m ruff format --check .` |
+| Types | `python -m mypy` |
+| Tests | `python -m pytest` and `npm test` in `frontend/` |
+| Security | `python -m bandit -c pyproject.toml -r app main.py` |
 
-This repo also ships a self-enforcing agent workflow that works with any coding agent: rules and skills in a single `.agents/` folder, a git pre-commit hook that gates commits on doc freshness and semver, and agent-oriented docs in `openwiki/`. If you work with coding agents it's a working reference setup — see [`openwiki/workflow.md`](openwiki/workflow.md); if you don't, it stays out of your way.
+The test suite runs offline. CI runs every check on each push and pull request, and a green build on `main` with a new version in `pyproject.toml` publishes a release automatically.
 
-## Credits & legal
+Architecture and module documentation for contributors (and coding agents) lives in [`openwiki/`](openwiki/quickstart.md); shared agent rules and skills live in [`.agents/`](AGENTS.md).
 
-- **[TCGdex](https://tcgdex.dev)** — the free, keyless card catalogue and image CDN this project is built on.
-- **[DINOv2](https://github.com/facebookresearch/dinov2)** (Meta AI, Apache 2.0) — the image encoder backbone. The fine-tuned encoder weights (`dinov2s-ft-v1.onnx`, a DINOv2-small derivative) are published on this repo's [Releases](https://github.com/TBLgGamin/pokeum/releases) page under Apache 2.0 — use them however you want; the full training harness to reproduce or improve them is in [`training/`](training/README.md).
-- **[RapidOCR](https://github.com/RapidAI/RapidOCR)** — collector-number OCR.
+## Contributing
 
-pokeum is a fan-made tool, not affiliated with, endorsed, or sponsored by Nintendo, Creatures Inc., GAME FREAK inc., or The Pokémon Company International. Pokémon and Pokémon character names are trademarks of Nintendo. Card images remain © their respective rights holders and are served from TCGdex.
+Bug reports, ideas and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for the setup, conventions and commit format, and follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Security
+
+Please report vulnerabilities privately as described in [SECURITY.md](SECURITY.md) rather than in a public issue.
+
+## Acknowledgements
+
+- [TCGdex](https://tcgdex.dev) for the free card catalogue and image CDN.
+- [DINOv2](https://github.com/facebookresearch/dinov2) by Meta AI (Apache 2.0), the base of the image encoder. The fine-tuned weights are published on the [Releases](https://github.com/TBLgGamin/pokeum/releases) page under Apache 2.0.
+- [RapidOCR](https://github.com/RapidAI/RapidOCR) for text recognition.
+
+pokeum is a fan project and is not affiliated with, endorsed or sponsored by Nintendo, Creatures Inc., GAME FREAK inc. or The Pokémon Company International. Pokémon and Pokémon character names are trademarks of Nintendo. Card images belong to their respective rights holders and are served from TCGdex.
 
 ## License
 
-[MIT](LICENSE)
+pokeum is released under the [MIT License](LICENSE). The fine-tuned encoder weights are released under Apache 2.0.

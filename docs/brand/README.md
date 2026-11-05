@@ -69,7 +69,7 @@ toggle, so the component swaps them with a `<picture>` `prefers-color-scheme` so
 | `pwa-192x192.png`, `pwa-512x512.png` | 192, 512 | `web/icon-192/512.png` | Manifest icons (`purpose: any`) |
 | `maskable-icon-512x512.png` | 512 | `web/maskable-512.png` | Android adaptive icon; symbol verified inside the central 40 % radius |
 | `logo.svg` | vector | `web/pokeum-symbol-app-icon.svg` | App icon artwork |
-| `og-image.png` | 1200×630 | rendered | Open Graph / Twitter large card: stacked lockup on white |
+| `og-image.jpg` | 1200×630 | cropped from `docs/media/pokeum-hero.png` | Open Graph / Twitter large card (the README hero) |
 | `og-image-square.png` | 1024×1024 | rendered | Square fallback for clients that crop to 1:1 |
 
 The apple and `pwa-*` icons are opaque full-bleed squares: iOS composites

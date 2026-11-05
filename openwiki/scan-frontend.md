@@ -211,7 +211,7 @@ format, transparency or maskable safe zone.
 | `pwa-{64x64,192x192,512x512}.png` | white symbol on violet | manifest icons (`any`) |
 | `maskable-icon-512x512.png` | symbol inside the central 40% radius | Android adaptive icon |
 | `logo.svg` | vector | app-icon artwork |
-| `og-image.png`, `og-image-square.png` | 1200×630, 1024×1024 | link previews (stacked lockup on white) |
+| `og-image.jpg`, `og-image-square.png` | 1200×630, 1024×1024 | link previews: the README hero cropped (wide), stacked lockup on white (square) |
 
 [`BrandLogo.vue`](../frontend/src/components/BrandLogo.vue) renders the
 horizontal lockup (header, ≥120 px wide) or the symbol (empty state) in a
