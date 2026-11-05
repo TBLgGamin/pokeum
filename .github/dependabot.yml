@@ -1,0 +1,31 @@
+# Weekly version updates, one grouped pull request per ecosystem. Security
+# updates for every ecosystem are switched on in the repository settings
+# (.github/repo-settings.sh) and need no entry here.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Add the package manager of the project the same way, for example:
+  #
+  # - package-ecosystem: npm        # also bun; or cargo, pip, uv, nuget
+  #   directory: /
+  #   schedule:
+  #     interval: weekly
+  #     day: monday
+  #   commit-message:
+  #     prefix: chore
+  #     include: scope
+  #   groups:
+  #     dependencies:
+  #       update-types: [minor, patch]
+  #       patterns: ["*"]

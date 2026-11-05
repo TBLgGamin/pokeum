@@ -1,1 +1,3 @@
-blank_issues_enabled: true
+# GitHub adds "Report a security vulnerability" to the issue chooser on its own,
+# because SECURITY.md exists and private vulnerability reporting is on.
+blank_issues_enabled: false

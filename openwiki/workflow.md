@@ -124,6 +124,22 @@ discipline as the Python suite. See [scan-frontend](scan-frontend.md).
   merges into per release. External PRs target `main`; day-to-day solo work
   commits directly to `dev`.
 
+## GitHub repository
+
+`.github/` holds the repository standard shared with the other TBLgGamin repos
+(from the `repo-template` template): the bug and feature issue forms (blank
+issues off; GitHub adds the security link because `SECURITY.md` exists), the PR
+template, `CODEOWNERS`, and `dependabot.yml`, which bumps GitHub Actions weekly.
+Python and npm pins are bumped by hand (see *Conventions*); Dependabot security
+updates still cover them. Repository settings are not files, so
+[`.github/repo-settings.sh`](../.github/repo-settings.sh) applies them with `gh`:
+squash merge only with the PR title as the commit message, branches deleted
+after merge, Dependabot alerts and security updates, secret scanning with push
+protection, private vulnerability reporting, and a ruleset that blocks force
+pushes to and deletion of the default branch. It is idempotent; re-run it after
+changing the visibility. `.editorconfig` sets UTF-8, LF and the indent per file
+type for editors.
+
 ## Agent automation (`.agents/`)
 
 All agent configuration lives in one folder, `.agents/`, shared by every coding
