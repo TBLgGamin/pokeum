@@ -48,6 +48,9 @@ class TrainConfig:
     Attributes:
         data_dir: Root holding ``images/``, ``manifest.json``, and ``cache/``.
         run_dir: Output directory for checkpoints, metrics, and the config dump.
+        backbone: torch.hub encoder key from ``training/backbones.py``.
+        backbone_weights: Local ``.pth`` for gated backbones (DINOv3); empty
+            when the entry point downloads its own weights.
         seed: Global seed for python/numpy/torch.
         batch_cards: Cards per step; each card contributes two views.
         epochs: Maximum epochs (early stopping may end the run sooner).
@@ -72,6 +75,8 @@ class TrainConfig:
 
     data_dir: str = "training_data"
     run_dir: str = "runs/ft"
+    backbone: str = "dinov2_vits14"
+    backbone_weights: str = ""
     seed: int = 42
     batch_cards: int = 512
     epochs: int = 40

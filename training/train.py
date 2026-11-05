@@ -1,4 +1,4 @@
-"""NT-Xent fine-tune loop for the DINOv2-S embedder.
+"""NT-Xent fine-tune loop for the card embedder (DINOv2-S by default).
 
 Per step: sample a batch of cards, build two views on-GPU — a near-clean
 gallery-like view and a heavy photo-simulation view (per card, 60/40 full-card
@@ -22,6 +22,7 @@ Usage::
 
     python -m training.train --data training_data --run-dir runs/ft
     python -m training.train --resume runs/ft
+    python -m training.train --backbone dinov3_vits16 --backbone-weights dinov3_vits16.pth
 """
 
 from __future__ import annotations
@@ -38,6 +39,7 @@ import numpy as np
 import torch
 
 from training import augment
+from training.backbones import BACKBONES
 from training.config import TrainConfig
 from training.dataset import CardImages, epoch_batches
 from training.evaluate import embed_clean_gallery, evaluate
@@ -127,7 +129,7 @@ def train(cfg: TrainConfig, resume_dir: str | None = None) -> dict[str, float]:
     cfg.save(run_dir / "config.json")
 
     images = CardImages.load(cfg.data_dir)
-    model = FineTuneModel(cfg.freeze_blocks).to(device)
+    model = FineTuneModel(cfg).to(device)
     optimizer = torch.optim.AdamW(param_groups(model, cfg), betas=(0.9, 0.999))
     steps_per_epoch = max(1, len(images) // cfg.batch_cards)
     scheduler = torch.optim.lr_scheduler.LambdaLR(
@@ -283,6 +285,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--batch-cards", type=int, default=None)
     parser.add_argument("--eval-queries", type=int, default=None)
     parser.add_argument("--device", default="cuda")
+    parser.add_argument(
+        "--backbone",
+        choices=sorted(BACKBONES),
+        default=None,
+        help=f"torch.hub encoder to fine-tune (default: {TrainConfig.backbone})",
+    )
+    parser.add_argument(
+        "--backbone-weights",
+        default=None,
+        help="local .pth for gated backbones (DINOv3)",
+    )
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -296,6 +309,10 @@ def main(argv: list[str] | None = None) -> int:
         cfg.batch_cards = args.batch_cards
     if args.eval_queries is not None:
         cfg.eval_queries = args.eval_queries
+    if args.backbone is not None:
+        cfg.backbone = args.backbone
+    if args.backbone_weights is not None:
+        cfg.backbone_weights = args.backbone_weights
 
     train(cfg, resume_dir=args.resume)
     return 0

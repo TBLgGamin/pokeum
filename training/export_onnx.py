@@ -14,8 +14,9 @@ onnxruntime on the exported file. Per-image cosine must exceed 0.999 or the
 artifact is rejected.
 
 Ship the artifact under a NEW filename per export (``dinov2s-ft-v1.onnx``,
-``-v2``, ...): the app's ``OnnxEmbedder.identifier`` is filename-based, and the
-index rebuild is triggered by that identifier changing.
+``-v2``, ...) so humans can tell exports apart; the app's
+``OnnxEmbedder.identifier`` is ``onnx:<filename>:<sha256[:12]>``, so any change
+to the weights triggers the index rebuild even under a reused filename.
 
 Usage::
 
@@ -95,7 +96,7 @@ def export(checkpoint: Path, out_path: Path) -> torch.nn.Module:
     state = torch.load(checkpoint, map_location="cpu", weights_only=False)
     raw_config = state.get("config")
     cfg = TrainConfig.from_dict(raw_config) if isinstance(raw_config, dict) else TrainConfig()
-    model = FineTuneModel(cfg.freeze_blocks)
+    model = FineTuneModel(cfg)
     model.load_state_dict(state["model"])
     backbone = model.backbone.float().eval()
 

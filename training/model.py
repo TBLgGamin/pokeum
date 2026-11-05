@@ -1,10 +1,11 @@
-"""Model assembly: DINOv2-S backbone + projection head, freeze plan, param groups.
+"""Model assembly: ViT backbone + projection head, freeze plan, param groups.
 
-The backbone comes from torch.hub (``facebookresearch/dinov2``), matching the
-model definition in ``scripts/export_embedder.py`` exactly, so the fine-tuned
-export is a drop-in for the app's ``OnnxEmbedder``. xformers must NOT be
-installed on the box: the hub code falls back to plain attention, which is both
-what we train and the export-friendly path.
+The backbone is whichever entry ``training/backbones.py`` resolves for
+``TrainConfig.backbone`` (DINOv2-S by default), loaded from torch.hub exactly as
+``scripts/export_embedder.py`` loads it, so a fine-tuned export stays a drop-in
+for the app's ``OnnxEmbedder``. xformers must NOT be installed on the box: the
+hub code falls back to plain attention, which is both what we train and the
+export-friendly path.
 
 The projection head exists only to absorb the contrastive loss's aggressive
 invariance compression (SimCLR-family finding); retrieval, eval, and the ONNX
@@ -18,19 +19,27 @@ import logging
 import torch
 from torch import nn
 
+from training.backbones import BACKBONES, load_backbone
 from training.config import IMAGENET_MEAN, IMAGENET_STD, INPUT_SIZE, TrainConfig
 
 logger = logging.getLogger(__name__)
 
-HUB_REPO = "facebookresearch/dinov2"
-HUB_MODEL = "dinov2_vits14"
-FEATURE_DIM = 384
+# Stem parameters frozen alongside the leading blocks: dinov2 carries pos_embed,
+# while dinov3 replaces it with rope_embed and adds storage (register) tokens.
+_FROZEN_STEM_PREFIXES = (
+    "patch_embed",
+    "cls_token",
+    "pos_embed",
+    "mask_token",
+    "storage_tokens",
+    "rope_embed",
+)
 
 
 class ProjectionHead(nn.Module):
     """MLP head mapping backbone features into the contrastive space."""
 
-    def __init__(self, in_dim: int = FEATURE_DIM, hidden: int = 1024, out_dim: int = 256) -> None:
+    def __init__(self, in_dim: int, hidden: int = 1024, out_dim: int = 256) -> None:
         """Build the head.
 
         Args:
@@ -52,25 +61,28 @@ class ProjectionHead(nn.Module):
 
 
 class FineTuneModel(nn.Module):
-    """DINOv2-S backbone with a projection head and a partial-freeze plan."""
+    """A configured ViT backbone with a projection head and a partial-freeze plan."""
 
-    def __init__(self, freeze_blocks: int) -> None:
-        """Load the backbone from torch.hub and apply the freeze plan.
+    def __init__(self, cfg: TrainConfig) -> None:
+        """Load the configured backbone from torch.hub and apply the freeze plan.
 
         Args:
-            freeze_blocks: Number of leading transformer blocks (plus the patch
-                embed and position/cls tokens) to freeze.
+            cfg: Run configuration; supplies the backbone name, its optional
+                local weights file, and how many leading transformer blocks
+                (plus the stem parameters) to freeze.
         """
         super().__init__()
-        self.backbone = torch.hub.load(HUB_REPO, HUB_MODEL)
-        self.head = ProjectionHead()
-        self._freeze(freeze_blocks)
+        spec = BACKBONES[cfg.backbone]
+        self.backbone = load_backbone(cfg.backbone, cfg.backbone_weights)
+        self.head = ProjectionHead(in_dim=spec.feature_dim)
+        self.feature_dim = spec.feature_dim
+        self._freeze(cfg.freeze_blocks)
 
     def _freeze(self, freeze_blocks: int) -> None:
-        """Freeze the patch embed, tokens, and the first ``freeze_blocks`` blocks."""
+        """Freeze the stem parameters and the first ``freeze_blocks`` blocks."""
         frozen = 0
         for name, param in self.backbone.named_parameters():
-            freeze = name.startswith(("patch_embed", "cls_token", "pos_embed", "mask_token"))
+            freeze = name.startswith(_FROZEN_STEM_PREFIXES)
             for i in range(freeze_blocks):
                 if name.startswith(f"blocks.{i}."):
                     freeze = True

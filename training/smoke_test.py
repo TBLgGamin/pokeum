@@ -72,21 +72,23 @@ def run() -> int:
     # Stage 3: load the model (front-loads the torch.hub download).
     import torch
 
+    from training.config import TrainConfig
     from training.model import FineTuneModel
 
     if not torch.cuda.is_available():
         return _fail("model", "CUDA not available")
-    model = FineTuneModel(freeze_blocks=4).to("cuda")
+    probe_cfg = TrainConfig(freeze_blocks=4)
+    model = FineTuneModel(probe_cfg).to("cuda")
     with torch.no_grad():
         probe = model.features(torch.zeros(1, 3, 224, 224, device="cuda"))
-    if tuple(probe.shape) != (1, 384):
-        return _fail("model", f"probe shape {tuple(probe.shape)} != (1, 384)")
+    feature_dim = model.feature_dim
+    if tuple(probe.shape) != (1, feature_dim):
+        return _fail("model", f"probe shape {tuple(probe.shape)} != (1, {feature_dim})")
     del model
     torch.cuda.empty_cache()
-    _ok("model", "dinov2_vits14 -> (1, 384)")
+    _ok("model", f"{probe_cfg.backbone} -> (1, {feature_dim})")
 
     # Stage 4: two training epochs on the tiny set.
-    from training.config import TrainConfig
     from training.train import train
 
     cfg = TrainConfig(

@@ -197,7 +197,7 @@ def main(argv: list[str] | None = None) -> int:
     raw_config = state.get("config")
     cfg = TrainConfig.from_dict(raw_config) if isinstance(raw_config, dict) else TrainConfig()
     cfg.device = args.device
-    model = FineTuneModel(cfg.freeze_blocks).to(device)
+    model = FineTuneModel(cfg).to(device)
     model.load_state_dict(state["model"])
     images = CardImages.load(args.data)
     metrics = evaluate(model, images, cfg, device)
