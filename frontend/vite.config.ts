@@ -1,5 +1,6 @@
 import { fileURLToPath, URL } from "node:url";
 
+import tailwindcss from "@tailwindcss/vite";
 import vue from "@vitejs/plugin-vue";
 import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
@@ -7,16 +8,29 @@ import { VitePWA } from "vite-plugin-pwa";
 export default defineConfig({
   plugins: [
     vue(),
+    tailwindcss(),
     VitePWA({
       // New deploys activate on the next launch without a user prompt.
       registerType: "autoUpdate",
-      includeAssets: ["favicon.ico", "apple-touch-icon-180x180.png", "logo.svg"],
+      includeAssets: [
+        "favicon.ico",
+        "favicon.svg",
+        "favicon-16x16.png",
+        "favicon-32x32.png",
+        "apple-touch-icon-152x152.png",
+        "apple-touch-icon-167x167.png",
+        "apple-touch-icon-180x180.png",
+        "logo.svg",
+      ],
       manifest: {
-        name: "pokeum — Pokémon card scanner",
-        short_name: "pokeum",
+        name: "Pokeum — Pokémon card scanner",
+        short_name: "Pokeum",
         description: "Scan and identify Pokémon cards, then export your collection.",
-        theme_color: "#09090b",
-        background_color: "#09090b",
+        // The brand set's own manifest values (docs/brand/guidelines.md §2): a
+        // manifest holds one colour, so it carries the light pairing; the dark
+        // counterpart (#0A0A0A) lives in index.html's media-scoped theme-color metas.
+        theme_color: "#FFFFFF",
+        background_color: "#FFFFFF",
         display: "standalone",
         orientation: "portrait",
         icons: [

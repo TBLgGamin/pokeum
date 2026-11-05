@@ -5,7 +5,19 @@ URL (e.g. a tunneled API host) to call the recognizer cross-origin — the API
 sends permissive CORS headers.
 */
 
-const API_BASE: string = (import.meta.env.VITE_API_BASE as string | undefined) ?? "/api";
+const API_BASE: string =
+  (import.meta.env.VITE_API_BASE as string | undefined) ?? "/api";
+
+/** A non-2xx answer from the API; `status` lets callers tell "busy" from "broken". */
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
 
 export interface CardSet {
   id: string;
@@ -31,11 +43,26 @@ export interface CandidateOut {
   variants?: VariantGuess[];
 }
 
+/** The card name read from the title band (title OCR) and used during fusion. */
+export interface NameRead {
+  name: string;
+  similarity: number;
+  confidence: number;
+}
+
 export interface IdentifyResponse {
-  status: "confident" | "uncertain" | "no_match" | "no_card_detected";
+  status:
+    "confident" | "uncertain" | "ambiguous" | "no_match" | "no_card_detected";
   match: CandidateOut | null;
   alternates: CandidateOut[];
-  ocr: { number: string | null; number_total: number | null; set_code: string | null } | null;
+  ocr: {
+    number: string | null;
+    number_total: number | null;
+    set_code: string | null;
+    confidence?: number;
+  } | null;
+  /** Title-OCR read; absent from older servers and null when nothing was read. */
+  name?: NameRead | null;
 }
 
 /**
@@ -61,35 +88,42 @@ export async function identify(
     body: form,
   });
   if (!response.ok) {
-    throw new Error(`identify failed: HTTP ${response.status}`);
+    throw new ApiError(
+      response.status,
+      `identify failed: HTTP ${response.status}`,
+    );
   }
   return (await response.json()) as IdentifyResponse;
 }
 
-/** Mirrors the backend's SCAN_ANNOTATION_SCHEMA_VERSION. */
-export const SCAN_ANNOTATION_SCHEMA_VERSION = 1;
-
-export interface ScanAnnotation {
-  schema_version: number;
-  consent: boolean;
-  card_id: string;
-  set_id: string;
-  number: string;
-  status: string;
-  variants: VariantGuess[];
-  alternate_card_ids: string[];
-  captured_at: string;
-}
-
-/** Submit an accepted scan (photo + annotation) for background collection. */
-export async function submitScan(blob: Blob, annotation: ScanAnnotation): Promise<void> {
+/**
+ * POST several frames of one card; the server merges them into one verdict.
+ *
+ * Used when a single frame was not decisive: frames are recognized in order
+ * and combined by mean confidence, so one glared frame cannot carry the answer.
+ */
+export async function identifyBurst(
+  blobs: Blob[],
+  topK = 5,
+  guideMargin?: number,
+): Promise<IdentifyResponse> {
   const form = new FormData();
-  form.append("file", blob, "scan.jpg");
-  form.append("annotation", JSON.stringify(annotation));
-  const response = await fetch(`${API_BASE}/scans`, { method: "POST", body: form });
+  blobs.forEach((blob, index) =>
+    form.append("files", blob, `frame-${index}.jpg`),
+  );
+  const query = new URLSearchParams({ top_k: String(topK) });
+  if (guideMargin !== undefined) query.set("guide_margin", String(guideMargin));
+  const response = await fetch(`${API_BASE}/identify/burst?${query}`, {
+    method: "POST",
+    body: form,
+  });
   if (!response.ok) {
-    throw new Error(`scan submit failed: HTTP ${response.status}`);
+    throw new ApiError(
+      response.status,
+      `identify burst failed: HTTP ${response.status}`,
+    );
   }
+  return (await response.json()) as IdentifyResponse;
 }
 
 /** URL of a card's reference image (served by the API from its cache). */
@@ -102,15 +136,28 @@ export function cardImageUrl(cardId: string): string {
  * (fast, cacheable offline, no server disk), else the API image endpoint —
  * which itself redirects to the CDN when the server has no local image cache.
  */
-export function cardArtUrl(card: Pick<CandidateOut, "card_id" | "image_url">): string {
+export function cardArtUrl(
+  card: Pick<CandidateOut, "card_id" | "image_url">,
+): string {
   return card.image_url ?? cardImageUrl(card.card_id);
 }
 
-/** Check the API is up and how many cards are indexed. */
-export async function health(): Promise<{ status: string; cards_indexed: number }> {
+/** Check the API is up, how many cards are indexed, and which embedder answers. */
+export async function health(): Promise<{
+  status: string;
+  cards_indexed: number;
+  embedder_id: string;
+}> {
   const response = await fetch(`${API_BASE}/health`);
   if (!response.ok) {
-    throw new Error(`health failed: HTTP ${response.status}`);
+    throw new ApiError(
+      response.status,
+      `health failed: HTTP ${response.status}`,
+    );
   }
-  return (await response.json()) as { status: string; cards_indexed: number };
+  return (await response.json()) as {
+    status: string;
+    cards_indexed: number;
+    embedder_id: string;
+  };
 }

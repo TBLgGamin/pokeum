@@ -1,49 +1,149 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "@fontsource-variable/space-grotesk/wght.css";
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/*
+ * Theme tokens are mtgfmax's (app/assets/css/tailwind.css): neutral greys plus
+ * one violet — the `--ring` hue, 297.347 — so the two apps read as siblings.
+ * Dark mode follows the OS: the `dark:` variant is Tailwind's default
+ * prefers-color-scheme media query and the dark tokens override :root below,
+ * so there is no theme switch, no stored preference and no flash.
+ */
+
+@theme inline {
+  --font-sans: "Space Grotesk Variable", ui-sans-serif, system-ui, sans-serif;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-guide: var(--guide);
+  --color-guide-accent: var(--guide-accent);
+
+  --animate-scan-sweep: scan-sweep 1.6s ease-in-out infinite;
+
+  @keyframes scan-sweep {
+    0% {
+      top: 6%;
+      opacity: 0;
+    }
+    15%,
+    85% {
+      opacity: 1;
+    }
+    100% {
+      top: 94%;
+      opacity: 0;
+    }
+  }
+}
+
+:root {
+  color-scheme: light;
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.5 0.16 297.347);
+
+  /*
+   * The scan guide is drawn over the live camera feed, whose brightness no
+   * theme controls, so these two stay light in both modes: paper white for
+   * the frame, the brand's dark-mode lavender for the "working" cue.
+   */
+  --guide: oklch(0.985 0 0);
+  --guide-accent: oklch(0.862 0.067 297.347);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.205 0 0);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.205 0 0);
+    --popover-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.922 0 0);
+    --primary-foreground: oklch(0.205 0 0);
+    --secondary: oklch(0.269 0 0);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.269 0 0);
+    --muted-foreground: oklch(0.708 0 0);
+    --accent: oklch(0.269 0 0);
+    --accent-foreground: oklch(0.985 0 0);
+    --destructive: oklch(0.704 0.191 22.216);
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.862 0.067 297.347);
+  }
+}
 
 @layer base {
-  :root {
-    --background: 0 0% 100%;
-    --foreground: 240 10% 3.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 240 10% 3.9%;
-    --primary: 240 6% 10%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 240 5% 96%;
-    --secondary-foreground: 240 6% 10%;
-    --muted: 240 5% 96%;
-    --muted-foreground: 240 4% 46%;
-    --accent: 240 5% 96%;
-    --accent-foreground: 240 6% 10%;
-    --destructive: 240 6% 10%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 6% 90%;
-    --input: 240 6% 90%;
-    --ring: 240 6% 10%;
-    --radius: 0.8rem;
-  }
-
   * {
-    @apply border-border;
+    @apply border-border outline-ring/50;
   }
 
   html {
-    @apply bg-zinc-950;
+    @apply bg-background;
+    /* A camera app must not reload when the preview is dragged downward. */
+    overscroll-behavior-y: none;
   }
 
   body {
-    @apply min-h-screen min-w-80 overflow-x-hidden bg-background font-sans text-foreground antialiased;
+    @apply min-w-80 overflow-x-clip bg-background font-sans text-foreground antialiased;
     min-height: 100dvh;
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
     -webkit-tap-highlight-color: transparent;
   }
 
-  button {
+  button,
+  [role="button"],
+  a {
     touch-action: manipulation;
   }
 
   ::selection {
-    @apply bg-sky-200 text-zinc-950;
+    background-color: color-mix(in oklab, var(--ring) 30%, transparent);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }

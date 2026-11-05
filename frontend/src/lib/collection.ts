@@ -5,7 +5,7 @@ survives reloads and PWA restarts. Entries are small (~300 bytes of card
 metadata; images stay in the service-worker cache keyed by URL), so even large
 collections sit far below storage quotas. Storage failures (private mode,
 quota) are swallowed — scanning keeps working, persistence just pauses, the
-same trade-off as `notice.ts`.
+same trade-off as `preferences.ts`.
 
 Bump `COLLECTION_VERSION` when the persisted shape changes incompatibly; old
 data is then discarded rather than half-parsed.
