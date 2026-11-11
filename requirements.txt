@@ -6,7 +6,7 @@
 
 # --- Numerics & imaging -----------------------------------------------------
 numpy==2.2.6
-Pillow==12.3.0
+Pillow==13.0.0
 # Perceptual hashing (pulls scipy + pywavelets). Used for clean-image matching.
 ImageHash==4.3.2
 # Card detection, perspective warp, and webcam capture. Headless build: capture
