@@ -2,7 +2,7 @@
 -r requirements.txt
 
 ruff==0.15.16
-pytest==8.3.3
+pytest==9.0.3
 mypy==2.1.0
 
 # Hook-config runner for the full local gate: `pre-commit run --all-files` lints,
@@ -21,4 +21,4 @@ bandit[toml]==1.9.4
 # OPTIONAL context-compression proxy for Claude Code sessions: compresses tool
 # output, logs, and history before they reach the model (reversible; originals
 # retrievable on demand). Start a compressed session with scripts/claude-headroom.
-headroom-ai[all]==0.30.0
+headroom-ai[all]==0.35.0
