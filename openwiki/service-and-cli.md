@@ -61,7 +61,7 @@ recognizer is expensive to construct, so it is built once during the app's
 lifespan and stashed on `app.state` for every request to share. Tests inject a
 ready-made recognizer to skip that cost.
 
-The OpenAPI document carries `_API_VERSION` (`2.0.0`), kept in step with the
+The OpenAPI document carries `_API_VERSION` (`2.0.1`), kept in step with the
 package version: v2 is a breaking surface change — the `ambiguous` status and
 `503` load shedding on `/identify`.
 

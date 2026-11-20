@@ -24,7 +24,7 @@ from app.recognize.pipeline import Recognizer
 
 logger = logging.getLogger(__name__)
 
-_API_VERSION = "2.0.0"
+_API_VERSION = "2.0.1"
 
 
 def create_app(recognizer: Recognizer | None = None) -> FastAPI:
