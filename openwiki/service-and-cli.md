@@ -2,7 +2,7 @@
 title: Service, CLI & webcam
 sources: ["app/cli.py", "app/api/**", "main.py", "app/recognize/factory.py", "app/recognize/webcam.py", "app/recognize/eval.py", "app/recognize/bench.py", "scripts/make_synthetic_eval.py"]
 read-when: "changing the CLI commands, the FastAPI endpoints, webcam scanning, the recognizer factory/wiring, or the eval/bench harnesses"
-verified: 388a26a04ef7
+verified: 43005d9e26c8
 ---
 
 # Service, CLI & webcam
