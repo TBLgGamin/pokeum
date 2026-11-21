@@ -233,7 +233,9 @@ helpers, the `useAutoCapture`, `useScanSession` and `useCollection` composables,
 and a jsdom smoke test that mounts `App.vue` through upload → verdict → save →
 collection) and `npm run build` (vue-tsc + vite) — neither is part of the Python
 gate; see [workflow](workflow.md). CI runs `npm ci`, so keep `package-lock.json`
-in step with `package.json`.
+in step with `package.json`. `package.json` `overrides` forces `glob` ^14 under
+`workbox-build` (7.4.1 pins glob 11, which pulls minimatch 10, GHSA-g3hv-75wg-m249);
+drop the override once workbox-build depends on glob >=14.
 
 ## Changing this area
 
