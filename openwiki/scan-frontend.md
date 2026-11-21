@@ -2,7 +2,7 @@
 title: Scan frontend (Vue PWA)
 sources: ["frontend/**", "docs/brand/**"]
 read-when: "changing the Vue scan UI: the scan and collection screens, the match sheet, auto-capture, the theme tokens or shadcn-vue components, the on-device collection and CSV export, the PWA/service-worker setup, the brand/icon assets, or the frontend build/test tooling"
-verified: def8cf9101c9
+verified: 2a263d130c3a
 ---
 
 # Scan frontend (Vue PWA)
